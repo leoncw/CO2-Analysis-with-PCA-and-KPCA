@@ -1,0 +1,71 @@
+---
+title: "05_Linear_Model"
+author: "Callum Weinberg"
+date: "May 19, 2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+
+## Load Data
+
+```{r load_data}
+load(file="Intermediate/model_data.Rdata")
+```
+
+## Prepare Data
+
+```{r}
+# Create Matrices
+
+# Add intercept column to X Matrix
+X_Matrix = cbind(rep(1,nrow(model_data)),
+                 as.matrix(model_data[,5:ncol(model_data)]))
+Y_Matrix = as.matrix(model_data[,4])
+```
+
+# OLS Model Using Base R
+```{r}
+# Linear Model Using R
+Model_Data = model_data %>%
+  select(-c(Date.Time,Units.of.Measure,Datum))
+
+model_linear = lm(Sample.Measurement ~ . ,data = Model_Data)
+summary(model_linear)
+
+#hist(residuals(model_linear))
+#cor(Model_Data)
+```
+
+
+## OLS Model Using Matrix Algebra
+```{r}
+summary(model_linear)
+
+# Coefficients
+B_Matrix = solve((t(X_Matrix)%*%X_Matrix))%*%t(X_Matrix)%*%Y_Matrix
+
+# Residuals
+e = X_Matrix%*%B_Matrix - Y_Matrix
+
+# (Unbiased) Estimate of Sigma^2
+sigma_2 = as.numeric((t(e)%*%e)/(nrow(X_Matrix) - ncol(X_Matrix)))
+
+# Variance of COefficients Given X
+V_Matrix = sigma_2*solve((t(X_Matrix)%*%X_Matrix))
+
+# Standard Errors
+SE_Matrix = sqrt(diag(V_Matrix))
+
+# Print Out Coefficients and Standard Errors
+OLS_Result = cbind(B_Matrix,SE_Matrix)
+rownames(OLS_Result) = c("Intercept","airport","commercial","elec_prod","industrial","nonroad","onroad","residential")
+colnames(OLS_Result) = c("B_hat","SE_Hat")
+
+print(OLS_Result)
+```

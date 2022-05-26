@@ -1,0 +1,325 @@
+---
+title: "04_EDA"
+author: "Callum Weinberg"
+date: "May 19, 2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+```{r}
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(cowplot)
+```
+
+## Load Data
+```{r loaddata}
+# Load Data
+load(file = "Intermediate/Ozone_CO2_Combined.Rdata")
+load(file = "Intermediate/Ozone_CO2_Combined_Long.Rdata")
+load(file = "Intermediate/Ozone_CO2_Combined_Long_Scaled.Rdata")
+load(file = "Intermediate/model_data.Rdata")
+```
+
+## Time Series Plots
+
+```{r ts_plot}
+## Plot Ozone Data for this Time Period
+ozone_ts = ggplot(data = Ozone_CO2_Combined, mapping = aes(x = Date.Time, y = Sample.Measurement)) +
+  geom_line() +
+  labs(x = "Date", y = "Ozone (Parts Per Million)") +
+  #labs(title = "Average Ozone PPM Across L.A. \nMeasured in Parts Per Milllion\nHourly, March 9th - March 16th 2014") +
+  scale_x_datetime(breaks = scales::breaks_pretty(12)) +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=14,face="bold"))
+
+## Plots for report
+png(filename = "Images/Ozone_TS_Plot.png", width = 960, height = 480)
+ozone_ts
+dev.off()
+
+
+## Plot CO2 Data for this Time Period, Not Scaled
+co2_unscaled_plot = ggplot(data = Ozone_CO2_Combined_Long, aes(x = Date.Time, y = CO2, color = Type)) +
+  geom_line() +
+  labs(x = "Date", y = "CO2 Emissions (Metric Tons)") +
+  #labs(title = "Average CO2 Across L.A. Sensors\nMeasured in Metric Tons\nHourly, March 9th - March 16th 2014") +
+  scale_x_datetime(breaks = scales::breaks_pretty(12)) +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=14,face="bold"))
+
+## Plot for report
+png(filename = "Images/CO2_TS_Plot_Not_Scaled.png", width = 960, height = 480)
+co2_unscaled_plot
+dev.off()
+
+## Plot CO2 Data for this Time Period, Not Scaled
+co2_scaled_plot = ggplot(data = Ozone_CO2_Combined_Long_Scaled, aes(x = Date.Time, y = CO2, color = Type)) +
+  geom_line(size = .3) +
+  labs(x = "Date", y = "CO2 Emissions (Scaled and Centered)") +
+  #labs(title = "Average CO2 Across L.A. Sensors\nMeasured in Metric Tons\nHourly, March 9th - March 16th 2014") +
+  scale_x_datetime(breaks = scales::breaks_pretty(12)) +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=14,face="bold"))
+
+## Plot for report
+png(filename = "Images/CO2_TS_Plot_Scaled.png", width = 960, height = 480)
+co2_scaled_plot
+dev.off()
+```
+
+
+## ACFs and PACFs for Ozone
+```{r acf_pacf_ozone}
+## Sample ACF
+ozone_acf_list = acf(Ozone_CO2_Combined$Sample.Measurement, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+ozone_acf = as.data.frame(do.call(cbind, ozone_acf_list))
+
+# Confidence Interval Line
+conf.level = 0.95
+ciline = qnorm((1 - conf.level)/2)/sqrt(length(Ozone_CO2_Combined$Sample.Measurement))
+
+# Plot
+ACF_Ozone_Graph = ggplot(data = ozone_acf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+
+## Sample PACF
+ozone_pacf_list = pacf(Ozone_CO2_Combined$Sample.Measurement, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+ozone_pacf = as.data.frame(do.call(cbind, ozone_pacf_list))
+
+# Plot
+PACF_Ozone_Graph = ggplot(data = ozone_pacf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "Partial ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+## Plots for Report
+png(filename = "Images/acf_pacf_ozone.png", width = 960, height = 480)
+plot_grid(ACF_Ozone_Graph,PACF_Ozone_Graph, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+dev.off()
+```
+
+## ACFs and PACFs for Airport
+
+```{r acf_pacf_airport}
+## Sample ACF
+airport_acf_list = acf(Ozone_CO2_Combined$airport, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+airport_acf = as.data.frame(do.call(cbind, airport_acf_list))
+
+# Confidence Interval Line
+conf.level = 0.95
+ciline = qnorm((1 - conf.level)/2)/sqrt(length(Ozone_CO2_Combined$airport))
+
+# Plot
+ACF_Airport_Graph = ggplot(data = airport_acf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+
+## Sample PACF
+airport_pacf_list = pacf(Ozone_CO2_Combined$airport, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+airport_pacf = as.data.frame(do.call(cbind, airport_pacf_list))
+
+# Plot
+PACF_Airport_Graph = ggplot(data = airport_pacf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "Partial ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+## Plots for Report
+png(filename = "Images/acf_pacf_airport.png", width = 960, height = 480)
+plot_grid(ACF_Airport_Graph,PACF_Airport_Graph, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+dev.off()
+```
+
+## ACFs and PACFs for Residential
+
+```{r acf_pacf_residential}
+## Sample ACF
+residential_acf_list = acf(Ozone_CO2_Combined$residential, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+residential_acf = as.data.frame(do.call(cbind, residential_acf_list))
+
+# Confidence Interval Line
+conf.level = 0.95
+ciline = qnorm((1 - conf.level)/2)/sqrt(length(Ozone_CO2_Combined$residential))
+
+# Plot
+ACF_Residential_Graph = ggplot(data = residential_acf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+
+## Sample PACF
+residential_pacf_list = pacf(Ozone_CO2_Combined$residential, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+residential_pacf = as.data.frame(do.call(cbind, residential_pacf_list))
+
+# Plot
+PACF_Residential_Graph = ggplot(data = residential_pacf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "Partial ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+## Plots for Report
+png(filename = "Images/acf_pacf_residential.png", width = 960, height = 480)
+plot_grid(ACF_Residential_Graph,PACF_Residential_Graph, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+dev.off()
+```
+
+
+## CCF for Ozone vs Airport and Residential
+```{r ccf}
+## CCF Ozone Airport
+ozone_airport_ccf_list = ccf(Ozone_CO2_Combined$Sample.Measurement,Ozone_CO2_Combined$airport, plot = TRUE, lag.max = 48,
+                             type = "correlation")
+
+# Put into Dataframe
+ozone_airport_ccf = as.data.frame(do.call(cbind, ozone_airport_ccf_list))
+
+# Plot
+CCF_Ozone_Airport_Graph = ggplot(data = ozone_airport_ccf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "CCF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+
+## CCF Ozone Residential
+ozone_residential_ccf_list = ccf(Ozone_CO2_Combined$Sample.Measurement,Ozone_CO2_Combined$residential, plot = TRUE, lag.max = 48,
+                             type = "correlation")
+
+# Put into Dataframe
+ozone_residential_ccf = as.data.frame(do.call(cbind, ozone_residential_ccf_list))
+
+# Plot
+CCF_Ozone_Residential_Graph = ggplot(data = ozone_residential_ccf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "CCF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+
+
+## Plots for Report
+png(filename = "Images/ccf_ozone_airport_residential.png", width = 960, height = 480)
+plot_grid(CCF_Ozone_Airport_Graph,CCF_Ozone_Residential_Graph, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+dev.off()
+```

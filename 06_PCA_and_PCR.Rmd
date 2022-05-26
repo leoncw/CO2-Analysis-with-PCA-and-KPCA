@@ -1,0 +1,219 @@
+---
+title: "06_PCA_and_PCR.Rmd"
+author: "Callum Weinberg"
+date: "May 19, 2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+```{r libraries}
+library(pls)
+library(kernlab)
+```
+
+## Load and Prepare Data
+
+```{r load_data}
+load(file="Intermediate/model_data.Rdata")
+
+# Create Matrices
+X_Matrix = model_data[,2:ncol(model_data)]
+Y_Matrix = as.matrix(model_data[,1])
+
+# Center and Scale Data
+X_scale_center = scale(X_Matrix,scale = TRUE, center = TRUE)
+```
+
+
+## PCA using Base R (Stats Package)
+
+```{r pca_prcomp}
+## Use prcomp function To Get PC and Projection
+# Measure Computational Time
+start = Sys.time() 
+
+# PR Comp Function. To be consistent with other methods,
+# Use the already scaled and centered version
+prcomp_pca = prcomp(X_scale_center,scale = FALSE, center = FALSE)
+
+# Measure Time
+end = Sys.time()
+prcomp_time = end-start
+remove(start,end)
+
+# Rename/Extract PC and Project Matrices
+prcomp_pc = prcomp_pca$x
+prcomp_proj = prcomp_pca$rotation
+```
+
+## PCA Using Eigenvalue Decomposition
+
+```{r pca_eigen}
+## Use eigen Function in R to get PC and Projection
+# Measure Computational Time
+start = Sys.time() 
+
+# Calculate Covariance Matrix of Centered and scaled data
+C = t(X_scale_center)%*%X_scale_center
+
+# Use eigen function to get eigen vectors of C
+# Innerproduct of X and eigenvectors to get principal components
+eigen_pc = X_scale_center%*%eigen(C)$vectors
+
+# Measure Time
+end = Sys.time()
+eigen_time = end-start
+remove(start,end)
+
+# The projection matrix is just the eigenvectors
+# Excluding this from computation time since it 
+# is not a necessary step (just renaming values
+# For consistency)
+eigen_proj = eigen(C)$vectors
+
+# Extract Eigenvalues as well
+eigen_C_values = eigen(C)$values
+```
+
+## PCA Using Singular Value Decomp
+
+```{r pca_SVD}
+## Use svd Function in R to get PC and Projection
+# Measure Computation Time
+start = Sys.time() 
+
+# Perform SVD Using R Function
+X_svd = svd(X_scale_center)
+
+# Get Principal Compents by m
+svd_pc = X_svd$u%*%diag(X_svd$d)
+
+# Measure Time
+end = Sys.time()
+svd_time = end-start
+remove(start,end)
+
+# Extract Values (not necessary for
+# Computation of PC's)
+svd_singular_values = X_svd$d
+svd_eigenvalues = svd_singular_values^2
+svd_proj = X_svd$v
+```
+
+## PCA Using NIPALS Algorithm
+
+```{r pca_nipals}
+## Use Nipals Algorithm in R to get PC and Projection
+# Measure Computation Time
+start = Sys.time() 
+
+# Set Seed for Reproducibility (to randomly set t)
+set.seed(42)
+
+# Initialize T and P matrices
+n = nrow(X_scale_center)
+p = ncol(X_scale_center)
+T = matrix(NA, nrow = n, ncol = p)
+P = matrix(NA, nrow = p, ncol = p)
+  
+# Initialize Raw data Matrix as scaled, centered matrix
+X = X_scale_center
+
+# Choose Threshold for convergence
+epsilon = .000000001 # cite learnche.org for suggestion for this value
+# Initialize to something greater than epsilon
+e = 1 
+# Counter to see how many iterations it takes for convergence
+counter = 0
+
+# Step 1: Initialize t
+t_vec = matrix(rnorm(n,0,1),byrow = TRUE)
+
+for (i in 1:ncol(X)){
+  # Loop for Component
+  while(e > epsilon) {
+    
+    # Check how many loops occur
+    counter = counter + 1
+  
+    # Step 2: Calculate p vector
+    p_prime = t((t(t_vec)%*%X)*(as.numeric(1/(t(t_vec)%*%t_vec))))
+    
+    # Step 3: Rescale Loading Vector
+    p_prime = p_prime*(as.numeric(1/sqrt(t(p_prime)%*%p_prime)))
+    
+    # Step 4: Regress X onto Normalized Loading Vector
+    t_vec_new = X%*%p_prime*(as.numeric(1/t(p_prime)%*%p_prime))
+    
+    # Step 5: Check for Difference between t_vec and t_vec_new
+    e = sum((t_vec - t_vec_new)^2)
+    t_vec = t_vec_new
+  }
+  
+  # Step 6: Save Score and Loading vectors and deflate X
+  T[,i] = t_vec
+  P[,i] = p_prime
+  # Deflate X
+  X = X - t_vec%*%t(p_prime)
+  
+  # Reset e
+  e = 1
+}
+
+# Measure Time
+end = Sys.time()
+nipals_time = end-start
+remove(start,end)
+
+# Extract/Rename Values
+nipals_pc = T
+nipals_proj = P
+```
+
+
+## PCA via Kernlab Package (Linear Kernel)
+
+```{r pca_kernlab}
+## Use the kernlab package and linear kernel to get PC
+# Measure Computation Time
+start = Sys.time() 
+
+# Linear Kernel, Should be same as Regular PCA (cite this)
+kpca_kernlab_linear = kpca(~.,as.data.frame(X_scale_center),kernel="vanilladot",
+            kpar=list(),features=7)
+
+# Measure Time
+end = Sys.time()
+kernlab_time = end-start
+remove(start,end)
+
+# Extract/Rename values
+kernlab_pc = pcv(kpca_kernlab_linear)
+kernlab_proj = rotated(kpca_kernlab_linear)
+```
+
+
+## Principal Component Regression
+
+```{r}
+# PCR Regression Using Principal Componets
+model_pcr_svd = lm(Y_Matrix ~ nipals_pc - 1)
+summary(model_pcr_svd)
+
+model_pcr_svd$coefficients %*% t(nipals_proj)
+
+# PCR Regression Using PLS Package
+#pca_regression_model = V1 ~ V2 + airport + commercial + elec_prod + industrial + nonroad + onroad + residential
+pca_regression_model = V1 ~ airport + commercial + elec_prod + industrial + nonroad + onroad + residential
+#pca_regression = pcr(pca_regression_model, data = as.data.frame(cbind(Y_Matrix,rep(1,nrow(X_scale_center)),X_scale_center)))
+pca_regression = pcr(pca_regression_model, data = as.data.frame(cbind(Y_Matrix,X_scale_center)))
+
+summary(pca_regression)
+
+
+```

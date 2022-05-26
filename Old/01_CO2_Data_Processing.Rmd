@@ -1,0 +1,193 @@
+---
+title: "Mess_Around"
+author: "Callum Weinberg"
+date: "May 8, 2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Packages
+
+```{r}
+library(ncdf4)
+library(stringr)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+```
+
+## Load Data
+
+```{r readcoords}
+nc_airport =  nc_open("Raw/Vulcan_CO2/Airport/Vulcan.v3.US.hourly.1km.airport.mn.2014.d069.nc4")
+
+print(nc_airport)
+dname <- "carbon_emissions"
+```
+
+```{r}
+# Read Space
+x <- ncvar_get(nc_airport,"x")
+xlname <- ncatt_get(nc_airport,"x","long_name")
+xunits <- ncatt_get(nc_airport,"x","units")
+nx <- dim(x)
+head(x)
+
+y <- ncvar_get(nc_airport,"y")
+ylname <- ncatt_get(nc_airport,"y","long_name")
+yunits <- ncatt_get(nc_airport,"y","units")
+ny <- dim(y)
+head(y)
+
+print(c(nx,ny))
+
+# Read Time
+time <- ncvar_get(nc_airport,"time")
+tunits <- ncatt_get(nc_airport,"time","units")
+nt <- dim(time)
+
+print(tunits)
+
+# Get CO2 Data
+CO2 <- ncvar_get(nc_airport,dname)
+dlname <- ncatt_get(nc_airport,dname,"long_name")
+dunits <- ncatt_get(nc_airport,dname,"units")
+fillvalue <- ncatt_get(nc_airport,dname,"_FillValue")
+```
+
+
+```{r}
+# Example Plot
+m <- 10
+CO2m_slice <- CO2[,,m]
+
+image(x,y,CO2m_slice, col = hcl.colors(9, palette = "viridis", alpha = 1,fixup = TRUE))
+```
+
+
+
+```{r getregion}
+#lat_check = (lat>33.80250 & lat <= 34.19925)      # True if in bounds e.g. 4200,1200
+#lon_check = (lon >= -118.5328 & lon <= -117.7514) # True if in bounds
+
+#lat_lon_check = ((lat_check == TRUE) & (lon_check == TRUE)) # This seems to work
+
+#lats=which(lat >= 33.80250 & lat <= 34.19925, arr.ind = TRUE)   # From Ozone Monitors
+#lons=which(lon >= -118.5328 & lon <= -117.7514) # From Ozone Monitors
+
+# Code from Climatemodel_demo_CESM1.Rmd
+ys = which(y >= -401193.688560163 & y <=  -353976.762435499)
+xs = which(x >= -1942544.51850291 & x <= -1880037.22186271)
+
+CO2avg <- apply(CO2[xs,ys,],3,function(i) mean(i, na.rm = TRUE))
+#CO2count <- apply(CO2[xs,ys,],3,function(i) sum(is.na(i) == FALSE))
+
+
+
+
+clim <- data.frame(time=rtime, tsavg=tsavg)
+yrclim = clim %>% group_by(year(rtime)) %>% summarize(Tann=mean(tsavg))
+yrclim$dt = unique(year(rtime))
+
+ggplot(yrclim, aes(dt, Tann-273.15))+geom_point()+labs(y="Southern CA Temperature", x="Year")+ geom_smooth(method="lm")
+```
+
+
+
+```{r get_CO2}
+library(ncdf4)
+library(stringr)
+path = "Raw/Vulcan_CO2/March2014/"
+
+
+nc =  nc_open("Raw/Vulcan_CO2/March2014/Vulcan.v3.US.hourly.1km.cement.mn.2014.d069.nc4")
+print(nc)
+string_list = c("Vulcan.v3.US.hourly.1km.airport.mn.2014.d069.nc4","Vulcan.v3.US.hourly.1km.airport.mn.2014.d070.nc4")
+
+
+files_list = list.files(path)
+dname <- "carbon_emissions"
+
+combined_df = data.frame(Type = "Holder", 
+                        FileName = "holder",
+                        CO2 = NA,
+                        CO2Units = NA,
+                        Time = NA,
+                        TimeUnits = NA)
+
+for(i in files_list){
+  
+  # Get Type
+  type = 
+    str_remove(
+      str_remove(
+        str_extract(i,"1km\\..+\\.mn"),
+        "1km\\."),
+      "\\.mn")
+
+  
+  nc =  nc_open(paste0(path,i))
+  #print(nc_airport)
+  
+  # Get Spacial and Time Data
+  x = ncvar_get(nc,"x")
+  y = ncvar_get(nc,"y")
+  time = ncvar_get(nc,"time")
+  tunits = ncatt_get(nc,"time","units")
+  
+  # Get CO2 Data and Units
+  CO2 = ncvar_get(nc,dname)
+  dunits = ncatt_get(nc,dname,"units")
+  
+  # Limit to Chosen LA Boundaries (in Meters, Lambert_Conformal_Conic Projection)
+  # Code from Climatemodel_demo_CESM1.Rmd
+  ys = which(y >= -401193.688560163 & y <=  -353976.762435499)
+  xs = which(x >= -1942544.51850291 & x <= -1880037.22186271)
+
+  # Get Average over all censors in the chosen boundaries, by hour
+  CO2avg = apply(CO2[xs,ys,],3,function(i) mean(i, na.rm = TRUE))
+  
+  # Create Dataframe of data to append
+  forappend = data.frame(Type = rep(type,12),
+                         FileName = rep(i,12),
+                         CO2 = CO2avg,
+                         CO2Units = rep(dunits$value,12),
+                         Time = time,
+                         TimeUnits = rep(tunits$value,12))
+  
+  combined_df = rbind(combined_df,forappend)
+  
+  # Clean out reused variables
+  remove(type,nc,x,y,time,tunits,CO2,dunits,ys,xs,CO2avg,forappend)
+}
+
+save(combined_df,file = "Intermediate/CO2_Long_v1.Rdata")
+```
+
+
+
+```{r Create_Long_and_Wide_Files}
+# Load the Output from Above. Takes 20-30 minutes to run, avoid
+# rerunning if possible
+load(file = "Intermediate/CO2_Long_v1.Rdata")
+
+# Remove top Row
+CO2_Long_V1 = combined_df[-c(1),]
+
+# Cleant The Date Variable
+CO2_Long_V1 = CO2_Long_V1 %>%
+  mutate(Date.Time = as.POSIXct(Time*3600,origin='2010-01-01 00:00:00')) %>%
+  mutate(Date.Time = Date.Time - hours(8) - minutes(30))
+
+#save(CO2_Long_V1,file = "Intermediate/CO2_Long_v1_using.Rdata") remove this
+
+# Wide Format
+CO2_Wide_V1 = CO2_Long_V1 %>%
+  select(Type,CO2,Date.Time) %>%
+  pivot_wider(names_from = Type, values_from = CO2)
+  
+save(CO2_Wide_V1,file = "Intermediate/CO2_Wide_v1_using.Rdata")
+```

@@ -1,0 +1,138 @@
+---
+title: "02_Ozone_Data_Processing.Rmd"
+author: "Callum Weinberg"
+date: "May 16, 2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Libraries
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(rematch)
+library(ggplot2)
+library(lubridate)
+library(stringr)
+library(tmap)
+library(sf)
+```
+
+
+## Load the Data
+
+```{r}
+# Load full dataest. It is 2 GB,
+# So have written this code in such a way that
+# this code chunk should only be run once
+ozone_full = read.csv("Raw/EPA_Air_Data/hourly_44201_2014.csv", header = TRUE)
+
+# Limit it to Los Angeles County
+ozone_la_california = ozone_full %>%
+  filter(State.Name == "California", County.Name == "Los Angeles")
+
+# Remove the large Dataset
+remove(ozone_full)
+
+# Save for future use
+save(ozone_la_california,file = "Intermediate/ozone_la_california.Rdata")
+```
+
+
+```{r}
+# Load Limited Dataset
+load("Intermediate/ozone_la_california.Rdata")
+
+# Limit the Data to March, 2014
+# Limit to Data from the WGS 1984 Projection
+ozone_la_california_limited = ozone_la_california %>%
+  filter(substr(Date.Local,1,7) == "2014-03") %>%
+  filter(Datum == "WGS84")
+```
+
+
+```{r}
+# Get LA County Censor Locations
+# And convert to an SF type object for mapping
+ozone_la_california_lat_lons = ozone_la_california %>%
+  select(Longitude,Latitude,Site.Num) %>%
+  distinct() %>% 
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+# Get LA County Censor Locations
+# in Meters
+#ozone_la_california_lat_lons_meters = ozone_la_california %>%
+#  select(Longitude,Latitude,Site.Num) %>%
+#  distinct() %>% 
+#  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326) %>%
+#  st_transform(crs = 102009)
+
+# Use this to limit CO2 data
+lcc <- st_crs("+proj=lcc +lat_1=20 +lat_2=60 +lat_0=40 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +datum=NAD83 +units=m no_defs")
+meters = st_transform(ozone_la_california_lat_lons, crs = lcc)
+
+# Load Shapefile
+la_county_sf = st_read("Raw/ca-county-boundaries/CA_Counties/CA_Counties_TIGER2016.shp") %>%
+  filter(NAMELSAD == "Los Angeles County")
+
+# Plot the Monitors
+ozone_monitor_plot = ggplot() +
+  geom_sf(data = la_county_sf) +
+  geom_sf(data = ozone_la_california_lat_lons, size = 0.9, aes(color = "maroon")) +
+  scale_color_identity(guide = "legend",
+                       name = "",
+                       labels = "Ozone Monitors") +
+  theme_minimal() +
+  coord_sf(crs = 4326) +
+  labs(x = "longitude",
+       y = "latitude",
+       title = "Los Angeles Ozone Monitors EPA Data")
+
+# Exclude Lancaster (9033) and Santa Clarita (6012)
+# Monitors from the Data Aggregation
+
+png(filename = "Images/ozone_monitor_plot.png", width = 480, height = 480)
+ozone_monitor_plot
+dev.off()
+
+```
+
+
+```{r}
+# Get the Average Ozone by date and hour
+ozone_la_california_collapsed = ozone_la_california_limited %>%
+  filter(Site.Num != 9033 & Site.Num != 6012) %>%
+  group_by(Date.Local,Time.Local,Units.of.Measure, Datum) %>%
+  summarise(Sample.Measurement = mean(Sample.Measurement)) %>%
+  as.data.frame() %>%
+  mutate(Date.Time = paste0(Date.Local, "-", Time.Local)) %>%
+  mutate(Date.Time = str_replace(Date.Time,":","-")) %>%
+  mutate(Date.Time = ymd_hm(Date.Time)) %>%
+  select(-Date.Local,-Time.Local)
+
+save(ozone_la_california_collapsed,file = "Intermediate/Ozone_CA_LA.Rdata")
+
+# Average if Lancaster and Santa Clarita Were Included
+ozone_la_california_collapsed_all = ozone_la_california_limited %>%
+  group_by(Date.Local,Time.Local,Units.of.Measure, Datum) %>%
+  summarise(Sample.Measurement = mean(Sample.Measurement)) %>%
+  as.data.frame() %>%
+  mutate(Date.Time = paste0(Date.Local, "-", Time.Local)) %>%
+  mutate(Date.Time = str_replace(Date.Time,":","-")) %>%
+  mutate(Date.Time = ymd_hm(Date.Time)) %>%
+  select(-Date.Local,-Time.Local)
+  
+
+# Lineplot
+ggplot() +
+  geom_line(data = ozone_la_california_collapsed, aes(x = Date.Time, y = Sample.Measurement)) +
+  geom_line(data = ozone_la_california_collapsed_all, aes(x = Date.Time, y = Sample.Measurement), 
+            color = "red", alpha = .5, size = .5)
+
+```

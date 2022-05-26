@@ -1,0 +1,177 @@
+---
+title: "07_kPCA_and_k_PCR"
+author: "Callum Weinberg"
+date: "May 21, 2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+```{r libraries}
+library(kernlab)
+library(pdist)
+```
+
+
+## Load and Prepare Data
+
+```{r load_data}
+load(file="Intermediate/model_data.Rdata")
+
+# Create Matrices
+X_Matrix = model_data[,5:ncol(model_data)]
+Y_Matrix = as.matrix(model_data[,4])
+
+# Center and Scale Data
+X_scale_center = scale(X_Matrix,center = TRUE, scale = TRUE)
+```
+
+
+## KPCA using kernlab package
+
+```{r kPCA_kernlab}
+# RBF, Sigma = .2
+kpca_kernlab_rbf <- kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
+            kpar=list(sigma=2),features=7)
+
+#pcv(kpca_kernlab_rbf)
+
+# Linear Kernel, Should be same as Regular PCA (cite this)
+kpca_kernlab_linear <- kpca(~.,as.data.frame(X_scale_center),kernel="vanilladot",
+            kpar=list(),features=7)
+
+kernlab_T = pcv(kpca_kernlab_linear)
+kernlab_rotated = rotated(kpca_kernlab_linear)
+
+```
+
+
+## Define Gram Matcies
+
+```{r distance_matrices}
+# Euclidean Distance Matrix Formula
+#RBF: Define Euclidean Distance Matrix 
+euclidean_distance_function = function(M) {
+
+  # Define Result Matrix for Outer Product
+  result = matrix(NA,nrow = nrow(M),ncol = nrow(M))
+  
+  for(i in 1:nrow(M)) {
+    for(j in 1:nrow(M)) {
+      # Note: Taking sqrt to make proper
+      # euclidean distance. Some kernels (rbf and 
+      # rq) then square the terms.
+      # Could decrease computing time slightly
+      # By not calculating true euclidean
+      # distance here
+      result[i,j] = sqrt(sum((M[i,] - M[j,])^2))
+    }
+  }
+  # Return Result
+  eu_matrix = result
+  return(eu_matrix)
+}
+
+
+#Radial Basis Function Kernel
+rbf_kernel = function(M, theta) {
+
+  # The euclidean distance matrix is squared
+  # then multiplied by -sigma and exponentiated
+  gram = exp(-1*(euclidean_distance_function(M)^2)/theta)
+  return(gram)
+}
+
+# Below is what will be used in kPCA
+# q = rbf_kernel(X_scale_center,2)
+
+# Rational Quadratic Kernel
+rq_kernel = function(M,theta,alpha) {
+  gram = (1 + ((euclidean_distance_function(M)^2)/(theta*alpha)))^(-1*alpha)
+  return(gram)
+}
+
+# Below is what will be used in kPCA
+p = rq_kernel(X_scale_center,2,.5)
+
+```
+
+## kPCA using Eigen Decomposition
+
+```{r kPCA_eigen}
+# Eigen decomposition of Gram Matrix
+eigen_decomp_X = eigen(rbf_kernel(X_scale_center,2))
+
+# Dimensions of the eigenvector matrix 
+eigen_vectors_X = eigen_decomp_X$vectors
+dim(eigen_vectors_X)
+
+
+h = eigen_vectors_X %*% diag(eigen_decomp_X$values) %*% solve(eigen_vectors_X)
+
+
+Cx = t(X_scale_center)%*%X_scale_center
+X_scale_center%*%eigen(Cx)$vectors
+
+eigen(b)$values
+
+
+
+```
+
+## kPCA using NIPALS algorithm
+
+```{r}
+set.seed(42)
+n = nrow(X_Matrix)
+p = ncol(X_Matrix)
+epsilon = .0000001
+e = 1 # Initialize to something greater than epsilon
+counter = 0
+
+# Initialize T and P
+T = matrix(NA, nrow = n, ncol = p)
+P = matrix(NA, nrow = p, ncol = p)
+  
+# Initialize Raw data Matrix as scaled, centered matrix
+X = X_scale_center
+
+# Step 1: Initialize t
+t_vec = matrix(rnorm(n,0,1),byrow = TRUE)
+
+for (i in 1:ncol(X)){
+  # Loop for Component
+  while(e > epsilon) {
+    
+    # Check how many loops occur
+    counter = counter + 1
+  
+    # Step 2: Calculate p vector
+    p_prime = t((t(t_vec)%*%X)*(as.numeric(1/(t(t_vec)%*%t_vec))))
+    
+    # Step 3: Rescale Loading Vector
+    p_prime = p_prime*(as.numeric(1/sqrt(t(p_prime)%*%p_prime)))
+    
+    # Step 4: Regress X onto Normalized Loading Vector
+    t_vec_new = X%*%p_prime*(as.numeric(1/t(p_prime)%*%p_prime))
+    
+    # Step 5: Check for Difference between t_vec and t_vec_new
+    e = sum((t_vec - t_vec_new)^2)
+    t_vec = t_vec_new
+  }
+  
+  # Step 6: Save Score and Loading vectors and deflate X
+  T[,i] = t_vec
+  P[,i] = p_prime
+  # Deflate X
+  X = X - t_vec%*%t(p_prime)
+  
+  # Reset e
+  e = 1
+
+
+```

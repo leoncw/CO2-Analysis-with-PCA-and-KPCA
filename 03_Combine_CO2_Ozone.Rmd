@@ -1,0 +1,86 @@
+---
+title: "03_Combine_CO2_Ozone"
+author: "Callum Weinberg"
+date: "May 18, 2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+```{r}
+library(dplyr)
+library(lubridate)
+```
+
+## Load Data
+```{r loaddata}
+# Load Data
+load(file = "Intermediate/Ozone_CA_LA.Rdata")
+load(file = "Intermediate/CO2_Wide_v1_using.Rdata")
+```
+
+## Merge Datasets
+
+```{r merge_datasets}
+# Merge
+Ozone_CO2_Combined = merge(ozone_la_california_collapsed,CO2_Wide_V1, 
+                        by.x = "Date.Time", 
+                        by.y = "Date.Time", all.x = FALSE)
+
+# Convert Date.Time to Date Class in R
+Ozone_CO2_Combined = Ozone_CO2_Combined %>%
+  mutate(Date.Time = as_datetime(Date.Time))
+```
+
+
+## Save Out Data
+
+```{r}
+## Full Dataset
+save(Ozone_CO2_Combined, file = "Intermediate/Ozone_CO2_Combined.Rdata")
+
+
+## Long version for CO2 Only (for EDA Graphs)
+Ozone_CO2_Combined_Long = Ozone_CO2_Combined %>%
+  select(Date.Time,airport,commercial,elec_prod,industrial,nonroad,onroad,
+         rail,residential) %>%
+  pivot_longer(c(airport,commercial,elec_prod,industrial,nonroad,onroad,
+         rail,residential),names_to = "Type",values_to="CO2") %>%
+  as.data.frame()
+# Save out
+save(Ozone_CO2_Combined_Long, file = "Intermediate/Ozone_CO2_Combined_Long.Rdata")
+
+## Scaled Long Version for CO2 Only (For EDA Graphs)
+Ozone_CO2_Combined_Long_Scaled = Ozone_CO2_Combined %>%
+  select(airport,commercial,elec_prod,industrial,nonroad,onroad,
+         rail,residential) %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  cbind(Ozone_CO2_Combined$Date.Time) %>%
+  as.data.frame() %>%
+  rename(Date.Time = V9) %>%
+  mutate(Date.Time = as_datetime(Date.Time))  %>%
+  pivot_longer(c(airport,commercial,elec_prod,industrial,nonroad,onroad,
+         rail,residential),names_to = "Type",values_to="CO2") %>%
+  as.data.frame()
+# Save Out
+save(Ozone_CO2_Combined_Long_Scaled, file = "Intermediate/Ozone_CO2_Combined_Long_Scaled.Rdata")
+
+
+
+## Model Data
+# Drop Cement and CMV Which Have no CO2 Information
+# And drop Rail which is constant
+var(Ozone_CO2_Combined$rail)
+
+model_data = Ozone_CO2_Combined %>%
+  select(-c(cement,cmv,rail)) %>%              # Drop, not covariats
+  select(-c(Date.Time,Units.of.Measure,Datum)) # Drop, not part of PCA/Regression
+
+
+# Save model data
+save(model_data,file = "Intermediate/model_data.Rdata")
+```

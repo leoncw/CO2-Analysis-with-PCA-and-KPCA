@@ -1,0 +1,116 @@
+---
+title: "Mess_Around"
+author: "Callum Weinberg"
+date: "May 8, 2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Packages
+
+```{r}
+library(ncdf4)
+library(stringr)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+```
+
+
+```{r get_CO2}
+# Indicate String Path
+path = "Raw/Vulcan_CO2/March2014/"
+
+# Get a list of files from the folder
+files_list = list.files(path)
+
+# Specify the name of the variable to be accessed
+# there are multiple variable available so this is
+# necessary
+dname = "carbon_emissions"
+
+# Create a dataframe to store the data from each file
+combined_df = data.frame(Type = "Holder", 
+                        FileName = "holder",
+                        CO2 = NA,
+                        CO2Units = NA,
+                        Time = NA,
+                        TimeUnits = NA)
+
+# Loop over all files
+for(i in files_list){
+  
+  # Get Type
+  type = 
+    str_remove(
+      str_remove(
+        str_extract(i,"1km\\..+\\.mn"),
+        "1km\\."),
+      "\\.mn")
+
+  
+  # Open the nc file type
+  nc =  nc_open(paste0(path,i))
+  
+  # Get Spacial and Time Data
+  x = ncvar_get(nc,"x")
+  y = ncvar_get(nc,"y")
+  time = ncvar_get(nc,"time")
+  tunits = ncatt_get(nc,"time","units")
+  
+  # Get CO2 Data and Units
+  CO2 = ncvar_get(nc,dname)
+  dunits = ncatt_get(nc,dname,"units")
+  
+  # Limit to Chosen LA Boundaries (in Meters, Lambert_Conformal_Conic Projection)
+  # Code from Climatemodel_demo_CESM1.Rmd
+  ys = which(y >= -401193.688560163 & y <=  -353976.762435499)
+  xs = which(x >= -1942544.51850291 & x <= -1880037.22186271)
+
+  # Get Average over all censors in the chosen boundaries, by hour
+  CO2avg = apply(CO2[xs,ys,],3,function(i) mean(i, na.rm = TRUE))
+  
+  # Create Dataframe of data to append
+  forappend = data.frame(Type = rep(type,12),
+                         FileName = rep(i,12),
+                         CO2 = CO2avg,
+                         CO2Units = rep(dunits$value,12),
+                         Time = time,
+                         TimeUnits = rep(tunits$value,12))
+  
+  # Add the new data to the previous data
+  combined_df = rbind(combined_df,forappend)
+  
+  # Clean out reused variables
+  remove(type,nc,x,y,time,tunits,CO2,dunits,ys,xs,CO2avg,forappend)
+}
+
+# Save out so this code does not need to be rerun often
+# took about 30 minutes on my machine
+save(combined_df,file = "Intermediate/CO2_Long_v1.Rdata")
+```
+
+
+```{r Create_Long_and_Wide_Files}
+# Load the Output from Above. Takes 20-30 minutes to run, avoid
+# rerunning if possible
+load(file = "Intermediate/CO2_Long_v1.Rdata")
+
+# Remove top Row
+CO2_Long_V1 = combined_df[-c(1),]
+
+# Cleant The Date Variable
+CO2_Long_V1 = CO2_Long_V1 %>%
+  mutate(Date.Time = as.POSIXct(Time*3600,origin='2010-01-01 00:00:00')) %>%
+  mutate(Date.Time = Date.Time - hours(8) - minutes(30))
+
+# Wide Format
+CO2_Wide_V1 = CO2_Long_V1 %>%
+  select(Type,CO2,Date.Time) %>%
+  pivot_wider(names_from = Type, values_from = CO2)
+  
+save(CO2_Wide_V1,file = "Intermediate/CO2_Wide_v1_using.Rdata")
+```
