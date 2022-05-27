@@ -14,16 +14,29 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r libraries}
 library(pls)
 library(kernlab)
+library(ggplot2)
+library(devtools)
+#install_github("vqv/ggbiplot")
+library(ggbiplot)
+library(lubridate)
+library(dplyr)
+library(cowplot)
+library(car)
+library(knitr)
 ```
 
 ## Load and Prepare Data
 
 ```{r load_data}
 load(file="Intermediate/model_data.Rdata")
+load(file = "Intermediate/Ozone_CO2_Combined.Rdata")
 
 # Create Matrices
 X_Matrix = model_data[,2:ncol(model_data)]
 Y_Matrix = as.matrix(model_data[,1])
+
+# Get Column of Hours
+X_hours = hour(Ozone_CO2_Combined$Date.Time)
 
 # Center and Scale Data
 X_scale_center = scale(X_Matrix,scale = TRUE, center = TRUE)
@@ -34,19 +47,23 @@ X_scale_center = scale(X_Matrix,scale = TRUE, center = TRUE)
 
 ```{r pca_prcomp}
 ## Use prcomp function To Get PC and Projection
-# Measure Computational Time
-start = Sys.time() 
-
-# PR Comp Function. To be consistent with other methods,
-# Use the already scaled and centered version
-prcomp_pca = prcomp(X_scale_center,scale = FALSE, center = FALSE)
-
-# Measure Time
-end = Sys.time()
-prcomp_time = end-start
-remove(start,end)
+# Measure Computational Time - 1000 Iterations
+time_prcomp_pca = data.frame(time = rep(NA,1000),method = rep("prcomp",1000))
+for (i in 1:1000) {
+  start = Sys.time() 
+  
+  # PR Comp Function. To be consistent with other methods,
+  # Use the already scaled and centered version
+  prcomp_pca = prcomp(X_scale_center,scale = FALSE, center = FALSE)
+  
+  # Measure Time
+  end = Sys.time()
+  time_prcomp_pca[i,1] = end-start
+  remove(start,end,prcomp_pca)
+}
 
 # Rename/Extract PC and Project Matrices
+prcomp_pca = prcomp(X_scale_center,scale = FALSE, center = FALSE)
 prcomp_pc = prcomp_pca$x
 prcomp_proj = prcomp_pca$rotation
 ```
@@ -55,25 +72,30 @@ prcomp_proj = prcomp_pca$rotation
 
 ```{r pca_eigen}
 ## Use eigen Function in R to get PC and Projection
-# Measure Computational Time
-start = Sys.time() 
-
-# Calculate Covariance Matrix of Centered and scaled data
-C = t(X_scale_center)%*%X_scale_center
-
-# Use eigen function to get eigen vectors of C
-# Innerproduct of X and eigenvectors to get principal components
-eigen_pc = X_scale_center%*%eigen(C)$vectors
-
-# Measure Time
-end = Sys.time()
-eigen_time = end-start
-remove(start,end)
+# Measure Computational Time - 1000 iterations
+time_eigen_pca = data.frame(time = rep(NA,1000),method = rep("eigen",1000))
+for (i in 1:1000) {
+  start = Sys.time() 
+  
+  # Calculate Covariance Matrix of Centered and scaled data
+  C = t(X_scale_center)%*%X_scale_center
+  
+  # Use eigen function to get eigen vectors of C
+  # Innerproduct of X and eigenvectors to get principal components
+  eigen_pc = X_scale_center%*%eigen(C)$vectors
+  
+  # Measure Time
+  end = Sys.time()
+  time_eigen_pca[i,1] = end-start
+  remove(start,end,C,eigen_pc)
+}
 
 # The projection matrix is just the eigenvectors
 # Excluding this from computation time since it 
 # is not a necessary step (just renaming values
 # For consistency)
+C = t(X_scale_center)%*%X_scale_center
+eigen_pc = X_scale_center%*%eigen(C)$vectors
 eigen_proj = eigen(C)$vectors
 
 # Extract Eigenvalues as well
@@ -84,22 +106,26 @@ eigen_C_values = eigen(C)$values
 
 ```{r pca_SVD}
 ## Use svd Function in R to get PC and Projection
-# Measure Computation Time
-start = Sys.time() 
+# Measure Computational Time - 1000 iterations
+time_svd_pca = data.frame(time = rep(NA,1000),method = rep("svd",1000))
+for (i in 1:1000) {
+  start = Sys.time() 
+  
+  # Perform SVD Using R Function
+  X_svd = svd(X_scale_center)
+  
+  # Get Principal Compents by m
+  svd_pc = X_svd$u%*%diag(X_svd$d)
+  
+  # Measure Time
+  end = Sys.time()
+  time_svd_pca[i,1] = end-start
+  remove(start,end,X_svd,svd_pc)
+}
 
-# Perform SVD Using R Function
+# Extract Values
 X_svd = svd(X_scale_center)
-
-# Get Principal Compents by m
 svd_pc = X_svd$u%*%diag(X_svd$d)
-
-# Measure Time
-end = Sys.time()
-svd_time = end-start
-remove(start,end)
-
-# Extract Values (not necessary for
-# Computation of PC's)
 svd_singular_values = X_svd$d
 svd_eigenvalues = svd_singular_values^2
 svd_proj = X_svd$v
@@ -108,71 +134,76 @@ svd_proj = X_svd$v
 ## PCA Using NIPALS Algorithm
 
 ```{r pca_nipals}
-## Use Nipals Algorithm in R to get PC and Projection
-# Measure Computation Time
-start = Sys.time() 
-
 # Set Seed for Reproducibility (to randomly set t)
 set.seed(42)
 
-# Initialize T and P matrices
-n = nrow(X_scale_center)
-p = ncol(X_scale_center)
-T = matrix(NA, nrow = n, ncol = p)
-P = matrix(NA, nrow = p, ncol = p)
+## Use Nipals Algorithm in R to get PC and Projection
+# Measure Computational Time - 1000 iterations
+time_nipals_pca = data.frame(time = rep(NA,1000),method = rep("nipals",1000))
+for (j in 1:1000) {
+  start = Sys.time() 
   
-# Initialize Raw data Matrix as scaled, centered matrix
-X = X_scale_center
-
-# Choose Threshold for convergence
-epsilon = .000000001 # cite learnche.org for suggestion for this value
-# Initialize to something greater than epsilon
-e = 1 
-# Counter to see how many iterations it takes for convergence
-counter = 0
-
-# Step 1: Initialize t
-t_vec = matrix(rnorm(n,0,1),byrow = TRUE)
-
-for (i in 1:ncol(X)){
-  # Loop for Component
-  while(e > epsilon) {
+  # Initialize T and P matrices
+  n = nrow(X_scale_center)
+  p = ncol(X_scale_center)
+  T = matrix(NA, nrow = n, ncol = p)
+  P = matrix(NA, nrow = p, ncol = p)
     
-    # Check how many loops occur
-    counter = counter + 1
+  # Initialize Raw data Matrix as scaled, centered matrix
+  X = X_scale_center
   
-    # Step 2: Calculate p vector
-    p_prime = t((t(t_vec)%*%X)*(as.numeric(1/(t(t_vec)%*%t_vec))))
+  # Choose Threshold for convergence
+  epsilon = .000000001
+  # Initialize to something greater than epsilon
+  e = 1 
+  # Counter to see how many iterations it takes for convergence
+  counter = 0
+  
+  # Step 1: Initialize t
+  t_vec = matrix(rnorm(n,0,1),byrow = TRUE)
+  
+  for (i in 1:ncol(X)){
+    # Loop for Component
+    while(e > epsilon) {
+      
+      # Check how many loops occur
+      counter = counter + 1
     
-    # Step 3: Rescale Loading Vector
-    p_prime = p_prime*(as.numeric(1/sqrt(t(p_prime)%*%p_prime)))
+      # Step 2: Calculate p vector
+      p_prime = t((t(t_vec)%*%X)*(as.numeric(1/(t(t_vec)%*%t_vec))))
+      
+      # Step 3: Rescale Loading Vector
+      p_prime = p_prime*(as.numeric(1/sqrt(t(p_prime)%*%p_prime)))
+      
+      # Step 4: Regress X onto Normalized Loading Vector
+      t_vec_new = X%*%p_prime*(as.numeric(1/t(p_prime)%*%p_prime))
+      
+      # Step 5: Check for Difference between t_vec and t_vec_new
+      e = sum((t_vec - t_vec_new)^2)
+      t_vec = t_vec_new
+    }
     
-    # Step 4: Regress X onto Normalized Loading Vector
-    t_vec_new = X%*%p_prime*(as.numeric(1/t(p_prime)%*%p_prime))
+    # Step 6: Save Score and Loading vectors and deflate X
+    T[,i] = t_vec
+    P[,i] = p_prime
+    # Deflate X
+    X = X - t_vec%*%t(p_prime)
     
-    # Step 5: Check for Difference between t_vec and t_vec_new
-    e = sum((t_vec - t_vec_new)^2)
-    t_vec = t_vec_new
+    # Reset e
+    e = 1
   }
   
-  # Step 6: Save Score and Loading vectors and deflate X
-  T[,i] = t_vec
-  P[,i] = p_prime
-  # Deflate X
-  X = X - t_vec%*%t(p_prime)
+  # Measure Time
+  end = Sys.time()
+  time_nipals_pca[j,1] = end-start
   
-  # Reset e
-  e = 1
+  # Extract Values
+  nipals_pc = T
+  nipals_proj = P
+  
+  remove(start,end,n,p,T,P,X,epsilon,e,
+         counter,p_prime,t_vec,t_vec_new)
 }
-
-# Measure Time
-end = Sys.time()
-nipals_time = end-start
-remove(start,end)
-
-# Extract/Rename Values
-nipals_pc = T
-nipals_proj = P
 ```
 
 
@@ -180,40 +211,200 @@ nipals_proj = P
 
 ```{r pca_kernlab}
 ## Use the kernlab package and linear kernel to get PC
-# Measure Computation Time
-start = Sys.time() 
-
-# Linear Kernel, Should be same as Regular PCA (cite this)
-kpca_kernlab_linear = kpca(~.,as.data.frame(X_scale_center),kernel="vanilladot",
-            kpar=list(),features=7)
-
-# Measure Time
-end = Sys.time()
-kernlab_time = end-start
-remove(start,end)
+# Measure Computational Time - 1000 iterations
+time_kernlab_pca = data.frame(time = rep(NA,1000),method = rep("kernlab",1000)) 
+for (i in 1:1000){
+  start = Sys.time() 
+  
+  # Linear Kernel, Same as Regular PCA
+  kpca_kernlab_linear = kpca(~.,as.data.frame(X_scale_center),kernel="vanilladot",
+              kpar=list(),features=7)
+  
+  # Measure Time
+  end = Sys.time()
+  time_kernlab_pca[i,1] = end-start
+  remove(start,end,kpca_kernlab_linear)
+  
+}
 
 # Extract/Rename values
+kpca_kernlab_linear = kpca(~.,as.data.frame(X_scale_center),kernel="vanilladot",
+            kpar=list(),features=7)
 kernlab_pc = pcv(kpca_kernlab_linear)
 kernlab_proj = rotated(kpca_kernlab_linear)
 ```
 
 
+## Plot Histograms of Time
+
+```{r pca_computational_time}
+# Create Dataframe for Plotting
+comp_df = rbind(time_prcomp_pca,time_eigen_pca,
+                time_svd_pca,time_kernlab_pca,time_nipals_pca)
+
+# Histogram for Single Variable
+computational_time_density_plot = 
+  ggplot(comp_df, aes(x = log(time), color = method, fill = method)) +
+  geom_density(alpha = 0.1) +
+  labs(x = "ln(Time) per Iteration", y = "Frequency") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+## Plot for report
+png(filename = "Images/PCA_Computational_Time.png", width = 960, height = 480)
+computational_time_density_plot
+dev.off()
+```
+
+## Confirm Methods produce same Principal Components
+
+
+```{r pc_confirmation}
+# Confirm Same Principal Components
+sum(abs(prcomp_pc)-abs(eigen_pc))
+sum(abs(prcomp_pc)-abs(svd_pc))
+sum(abs(prcomp_pc)-abs(nipals_pc))
+# Not the same, needs inspection
+sum(abs(prcomp_pc)-abs(xmatrix(kpca_kernlab_linear)))
+
+```
+
+## Scree Plot
+
+```{r pca_scree_plot}
+# Percent of Variance Explained
+percent_variance_explained = 
+  data.frame(PC = seq(1,7,by=1), 
+             Percent_Variance = (svd_eigenvalues / sum(svd_eigenvalues)))
+
+# Create Scree Plot
+pca_scree = ggplot(data = percent_variance_explained, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  geom_text(aes(label = round(Percent_Variance,4)), size = 3, color = "red", nudge_y = -.05) +
+  scale_y_continuous(breaks = seq(0,.7,by = .1)) +
+  scale_x_continuous(breaks = seq(1,7,by = 1)) +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+## Plot for report
+png(filename = "Images/PCA_Scree_Plot.png", width = 720, height = 480)
+pca_scree
+dev.off()
+```
+
+
+## Biplot of Principal Components
+
+```{r pca_biplot}
+## Using ggbiplot package designed for PC object
+
+
+# Get Hours and Grouped Hours
+X_hours_df = data.frame(hours = X_hours) %>%
+  mutate(hour_group = ifelse(hours %in% c(21,22,23,0,1,2,3,4,5),"Night",
+                             ifelse(hours %in% c(15,16,17,18,19,20),"Evening",
+                                    ifelse(hours %in% c(6,7,8,9),"Morning","Mid-day"))))
+
+
+# Plot 1: Just Loading Vectors
+biplot_1_2_plain = ggbiplot(prcomp_pca)
+
+# Plot 2: Loading Vectors and Grouping by time of day
+biplot_1_2_groups = ggbiplot(prcomp_pca, labels=X_hours_df$hours, groups = X_hours_df$hour_group)
+
+# Plot 3: Loading vectors with Ellipses for groups
+biplot_1_2_groups_ellipses = 
+  ggbiplot(prcomp_pca, ellipse=TRUE,  labels=X_hours_df$hours, groups = X_hours_df$hour_group)
+
+# Biplot of 3rd and 4th Principal Components
+biplot_3_4_groups_ellipses = ggbiplot(prcomp_pca, choices=c(3,4), ellipse=TRUE,  labels=X_hours_df$hours, groups = X_hours_df$hour_group)
+
+
+## Plots for Report
+png(filename = "Images/biplot_pc_1_2.png", width = 960, height = 480)
+plot_grid(biplot_1_2_plain,biplot_1_2_groups, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+dev.off()
+
+png(filename = "Images/biplot_pc_1_2_detailed.png", width = 480, height = 480)
+biplot_1_2_groups_ellipses
+dev.off
+
+png(filename = "Images/biplot_pc_3_4.png", width = 480, height = 480)
+biplot_3_4_groups_ellipses
+dev.off
+
+```
+
+
 ## Principal Component Regression
 
-```{r}
-# PCR Regression Using Principal Componets
-model_pcr_svd = lm(Y_Matrix ~ nipals_pc - 1)
-summary(model_pcr_svd)
+```{r linear_model}
+# Illustrate why PCR is Useful Here
+model_linear_1 = lm(data = Ozone_CO2_Combined, Sample.Measurement ~ 
+                      airport + commercial + elec_prod + industrial + nonroad + onroad + residential)
 
-model_pcr_svd$coefficients %*% t(nipals_proj)
+vif(model_linear_1)
 
-# PCR Regression Using PLS Package
-#pca_regression_model = V1 ~ V2 + airport + commercial + elec_prod + industrial + nonroad + onroad + residential
+## Alternatively, VIF for PC
+# PCR Regression Using All Principal Componets
+df_example = data.frame(cbind(Y_Matrix,svd_pc))
+model_pc_example = lm(X1 ~ ., data = df)
+
+vif(pcr_all_pc)
+```
+
+Fairly clear issues with the linear model and multicollinearity.
+
+```{r pcr_by_pc}
+# PCR Regression Using All Principal Componets
+pcr_all_pc = lm(Y_Matrix ~ svd_pc - 1)
+summary(pcr_all_pc)
+
+# PCR Regression Using 4 Principal Componets
+pcr_4_pc = lm(Y_Matrix ~ svd_pc[,c(1:4)] - 1)
+summary(pcr_4_pc)
+
+kable(pcr_4_pc$coefficients,pcr_4_pc$)
+
+
+# PCR Regression Using 2 Principal Componets
+#pcr_2_pc = lm(Y_Matrix ~ svd_pc[,c(1:2)] - 1)
+#summary(pcr_2_pc)
+
+# PCR Regression Using 1 Principal Componets
+#pcr_1_pc = lm(Y_Matrix ~ svd_pc[,c(1)] - 1)
+#summary(pcr_1_pc)
+
+#pcr_all_coef = pcr_all_pc$coefficients %*% t(svd_proj)
+#as.matrix(X_Matrix)%*%t(pcr_all_coef)
+```
+
+
+```{r pcr_pls_package}
+## PCR Regression Using PLS Package
+# This portion just illustrates that PCR function
+# can be used to achieve the same results
+can 
 pca_regression_model = V1 ~ airport + commercial + elec_prod + industrial + nonroad + onroad + residential
-#pca_regression = pcr(pca_regression_model, data = as.data.frame(cbind(Y_Matrix,rep(1,nrow(X_scale_center)),X_scale_center)))
 pca_regression = pcr(pca_regression_model, data = as.data.frame(cbind(Y_Matrix,X_scale_center)))
 
-summary(pca_regression)
-
+# Illustrating that the coefficients from
+# PCR package are the same as those produces when
+# fitting the linear model, after those coefficients
+# have been projected onto the subspace
+pcr_all_pc$coefficients %*% t(svd_proj)
+pca_regression$coefficients[,,7]
 
 ```

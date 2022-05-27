@@ -2,7 +2,9 @@
 title: "07_kPCA_and_k_PCR"
 author: "Callum Weinberg"
 date: "May 21, 2022"
-output: pdf_document
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE}
@@ -13,7 +15,6 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r libraries}
 library(kernlab)
-library(pdist)
 ```
 
 
@@ -29,26 +30,6 @@ Y_Matrix = as.matrix(model_data[,4])
 # Center and Scale Data
 X_scale_center = scale(X_Matrix,center = TRUE, scale = TRUE)
 ```
-
-
-## KPCA using kernlab package
-
-```{r kPCA_kernlab}
-# RBF, Sigma = .2
-kpca_kernlab_rbf <- kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
-            kpar=list(sigma=2),features=7)
-
-#pcv(kpca_kernlab_rbf)
-
-# Linear Kernel, Should be same as Regular PCA (cite this)
-kpca_kernlab_linear <- kpca(~.,as.data.frame(X_scale_center),kernel="vanilladot",
-            kpar=list(),features=7)
-
-kernlab_T = pcv(kpca_kernlab_linear)
-kernlab_rotated = rotated(kpca_kernlab_linear)
-
-```
-
 
 ## Define Gram Matcies
 
@@ -100,78 +81,332 @@ p = rq_kernel(X_scale_center,2,.5)
 
 ```
 
-## kPCA using Eigen Decomposition
+## KPCA RBF Kernel: Exploring how Changes in Sigma Effect Number of Principal Components
 
-```{r kPCA_eigen}
-# Eigen decomposition of Gram Matrix
-eigen_decomp_X = eigen(rbf_kernel(X_scale_center,2))
+```{r kPCA_kernlab}
+## RBF, Sigma = .01
+# sigma is defined as the "inverse kernel width on Kernlab", i.e. is in the denominator
+kpca_kernlab_rbf_01 = kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
+            kpar=list(sigma=.01))
 
-# Dimensions of the eigenvector matrix 
-eigen_vectors_X = eigen_decomp_X$vectors
-dim(eigen_vectors_X)
+kpcs_rbf_pc_01 = pcv(kpca_kernlab_rbf_01)
+kpcs_rbf_eig_01 = eig(kpca_kernlab_rbf_01)
+
+# Percent of Variance Explained
+percent_variance_explained_rbf_01 = 
+  data.frame(PC = seq(1,length(kpcs_rbf_eig_01),by=1), 
+             Percent_Variance = (kpcs_rbf_eig_01 / sum(kpcs_rbf_eig_01)))
+
+# Create Scree Plot
+kpca_rbf_scree_01 = ggplot(data = percent_variance_explained_rbf_01, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+# plot the output
+png(filename = "Images/rbf_sigma_01.png", width = 480, height = 480)
+kpca_rbf_scree_01
+dev.off()
 
 
-h = eigen_vectors_X %*% diag(eigen_decomp_X$values) %*% solve(eigen_vectors_X)
+## RBF, Sigma = 1
+# sigma is defined as the "inverse kernel width on Kernlab", i.e. is in the denominator
+kpca_kernlab_rbf_1 = kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
+            kpar=list(sigma=1))
+
+kpcs_rbf_pc_1 = pcv(kpca_kernlab_rbf_1)
+kpcs_rbf_eig_1 = eig(kpca_kernlab_rbf_1)
+
+# Percent of Variance Explained
+percent_variance_explained_rbf_1 = 
+  data.frame(PC = seq(1,length(kpcs_rbf_eig_1),by=1), 
+             Percent_Variance = (kpcs_rbf_eig_1 / sum(kpcs_rbf_eig_1)))
+
+# Create Scree Plot
+kpca_rbf_scree_1 = ggplot(data = percent_variance_explained_rbf_1, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+# Plot the output
+png(filename = "Images/rbf_sigma_1.png", width = 480, height = 480)
+kpca_rbf_scree_1
+dev.off()
 
 
-Cx = t(X_scale_center)%*%X_scale_center
-X_scale_center%*%eigen(Cx)$vectors
+## RBF, Sigma = 2
+# sigma is defined as the "inverse kernel width on Kernlab", i.e. is in the denominator
+kpca_kernlab_rbf_2 = kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
+            kpar=list(sigma=2))
 
-eigen(b)$values
+kpcs_rbf_pc_2 = pcv(kpca_kernlab_rbf_2)
+kpcs_rbf_eig_2 = eig(kpca_kernlab_rbf_2)
+
+# Percent of Variance Explained
+percent_variance_explained_rbf_2 = 
+  data.frame(PC = seq(1,length(kpcs_rbf_eig_2),by=1), 
+             Percent_Variance = (kpcs_rbf_eig_2 / sum(kpcs_rbf_eig_2)))
+
+# Create Scree Plot
+kpca_rbf_scree_2 = ggplot(data = percent_variance_explained_rbf_2, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+# save the output
+png(filename = "Images/rbf_sigma_2.png", width = 480, height = 480)
+kpca_rbf_scree_2
+dev.off()
 
 
+## Measure relationship between sigma and number of PCs
+# required to get to 75% of variance explained
 
-```
+# Define a list of sigmas to explore (l in project formula)
+sigma_list = seq(.01,2.1,by = .1)
 
-## kPCA using NIPALS algorithm
+# Specify dataframe to add the number of PCs (technically loading vectors)
+# necessary
+rbf_df = data.frame(sigma = sigma_list, pc_count = rep(NA,length(sigma_list)))
 
-```{r}
-set.seed(42)
-n = nrow(X_Matrix)
-p = ncol(X_Matrix)
-epsilon = .0000001
-e = 1 # Initialize to something greater than epsilon
+# Counter for loop
 counter = 0
 
-# Initialize T and P
-T = matrix(NA, nrow = n, ncol = p)
-P = matrix(NA, nrow = p, ncol = p)
+# Loop over each value
+for (i in sigma_list) {
+  counter = counter + 1
   
-# Initialize Raw data Matrix as scaled, centered matrix
-X = X_scale_center
+  # Perform KPCA with the specified value of sigma
+  kpca_kernlab_rbf = kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
+              kpar=list(sigma=i))
+  
+  # Calculate the cumulative variance, as provided
+  # by the normalized eigenvalues
+  cumeig = cumsum(eig(kpca_kernlab_rbf)/sum(eig(kpca_kernlab_rbf)))
+  
+  # Get the number of eigenvalues (i.e. PCs) necessary
+  # to get to 75%
+  number = length(cumeig[which(cumeig < .75)]) + 1
 
-# Step 1: Initialize t
-t_vec = matrix(rnorm(n,0,1),byrow = TRUE)
+  #store the variable
+  rbf_df[counter,2] = as.numeric(number)
+  
+  remove(kpca_kernlab_rbf,cumeig,number)
+}
 
-for (i in 1:ncol(X)){
-  # Loop for Component
-  while(e > epsilon) {
-    
-    # Check how many loops occur
-    counter = counter + 1
+# Plot the Value of sigma by the variable
+pca_count_plot_rbf = ggplot(data = rbf_df, aes(x = sigma, y = pc_count)) + 
+  geom_point() +
+  geom_line() +
+  labs(x = "l", y = "# of Principal Components \n needed to explain 75% variation") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
   
-    # Step 2: Calculate p vector
-    p_prime = t((t(t_vec)%*%X)*(as.numeric(1/(t(t_vec)%*%t_vec))))
-    
-    # Step 3: Rescale Loading Vector
-    p_prime = p_prime*(as.numeric(1/sqrt(t(p_prime)%*%p_prime)))
-    
-    # Step 4: Regress X onto Normalized Loading Vector
-    t_vec_new = X%*%p_prime*(as.numeric(1/t(p_prime)%*%p_prime))
-    
-    # Step 5: Check for Difference between t_vec and t_vec_new
-    e = sum((t_vec - t_vec_new)^2)
-    t_vec = t_vec_new
-  }
+
+# Save the output
+png(filename = "Images/rbf_varying_sigma.png", width = 960, height = 480)
+pca_count_plot_rbf
+dev.off
+
+```
+
+
+
+## KPCA Polydot Kernel: Exploring how Changes in Degree Effect Number of Principal Components
+
+```{r kPCA_kernlab}
+## Poly, Degree = 1
+kpca_kernlab_poly_1 = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
+            kpar=list(degree = 1))
+
+kpcs_poly_1 = pcv(kpca_kernlab_poly_1)
+kpcs_poly_eig_1 = eig(kpca_kernlab_poly_1)
+
+# Percent of Variance Explained
+percent_variance_explained_poly_1 = 
+  data.frame(PC = seq(1,length(kpcs_poly_eig_1),by=1), 
+             Percent_Variance = (kpcs_poly_eig_1 / sum(kpcs_poly_eig_1)))
+
+# Create Scree Plot
+kpca_poly_scree_1 = ggplot(data = percent_variance_explained_poly_1, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+png(filename = "Images/poly_degree_1.png", width = 480, height = 480)
+kpca_poly_scree_1
+dev.off()
+
+
+## Poly, Degree = 2
+kpca_kernlab_poly_2 = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
+            kpar=list(degree = 2))
+
+kpcs_poly_2 = pcv(kpca_kernlab_poly_2)
+kpcs_poly_eig_2 = eig(kpca_kernlab_poly_2)
+
+# Percent of Variance Explained
+percent_variance_explained_poly_2 = 
+  data.frame(PC = seq(1,length(kpcs_poly_eig_2),by=1), 
+             Percent_Variance = (kpcs_poly_eig_2 / sum(kpcs_poly_eig_2)))
+
+# Create Scree Plot
+kpca_poly_scree_2 = ggplot(data = percent_variance_explained_poly_2, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+png(filename = "Images/poly_degree_2.png", width = 480, height = 480)
+kpca_poly_scree_2
+dev.off()
+
+
+## Poly, Degree = 10
+kpca_kernlab_poly_10 = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
+            kpar=list(degree = 10))
+
+kpcs_poly_10 = pcv(kpca_kernlab_poly_10)
+kpcs_poly_eig_10 = eig(kpca_kernlab_poly_10)
+
+# Percent of Variance Explained
+percent_variance_explained_poly_10 = 
+  data.frame(PC = seq(1,length(kpcs_poly_eig_10),by=1), 
+             Percent_Variance = (kpcs_poly_eig_10 / sum(kpcs_poly_eig_10)))
+
+# Create Scree Plot
+kpca_poly_scree_10 = ggplot(data = percent_variance_explained_poly_10, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+png(filename = "Images/poly_degree_10.png", width = 480, height = 480)
+kpca_poly_scree_10
+dev.off()
+
+
+## Measure relationship between sigma and number of PCs
+# required to get to 50% of variance explained
+
+# Define a list of degrees
+degree_list = seq(1,15,by = 1)
+
+# create dataframe to capture the results
+poly_df = data.frame(poly = degree_list, pc_count = rep(NA,length(degree_list)))
+
+# Counter for loop
+counter = 0
+
+for (i in degree_list) {
+  counter = counter + 1
   
-  # Step 6: Save Score and Loading vectors and deflate X
-  T[,i] = t_vec
-  P[,i] = p_prime
-  # Deflate X
-  X = X - t_vec%*%t(p_prime)
+  # Perform kpca with the polynomial kernel
+  kpca_kernlab_poly = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
+            kpar=list(degree = i))
   
-  # Reset e
-  e = 1
+  # Calculate the cumulative sum of the normalized eigenvalues
+  cumeig = cumsum(eig(kpca_kernlab_poly)/sum(eig(kpca_kernlab_poly)))
+  
+  #measure how many PCs are necessary to get to over 75% of variance explained
+  number = length(cumeig[which(cumeig < .75)]) + 1
+
+  poly_df[counter,2] = as.numeric(number)
+  
+  remove(kpca_kernlab_poly,cumeig,number)
+}
+
+# Plot the output
+pca_count_plot_poly = ggplot(data = poly_df, aes(x = poly, y = pc_count)) + 
+  geom_point() +
+  geom_line() +
+  labs(x = "Degree", y = "# of Principal Components \n needed to explain 75% variation") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+# Save the output
+png(filename = "Images/poly_varying_degree.png", width = 960, height = 480)
+pca_count_plot_poly
+dev.off
+
+```
+
+
+
+```{r additional_code}
+## The below is not working
+
+## Using the Kernels
+sigma_list = seq(.5,2.5,by = .5)
+count_df = data.frame(sigma = sigma_list, pc_count = rep(NA,length(sigma_list)))
+
+counter = 0
+
+for (i in sigma_list) {
+  counter = counter + 1
+  K = rbf_kernel(X_Matrix,2)
+  
+  K_eigen = sort(Re(eigen(K)$values), decreasing = TRUE) / sum(Re(eigen(K)$values))
+  cumeig = cumsum(K_eigen)
+  
+  number = length(cumeig[which(cumeig < .5)]) + 1
+
+  count_df[counter,2] = as.numeric(number)
+  
+  remove(K,K_eigen,cumeig,number)
+}
+
 
 
 ```
+

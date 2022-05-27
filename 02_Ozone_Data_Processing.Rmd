@@ -27,7 +27,7 @@ library(sf)
 
 ## Load the Data
 
-```{r}
+```{r load_epa_ozone, eval = FALSE}
 # Load full dataest. It is 2 GB,
 # So have written this code in such a way that
 # this code chunk should only be run once
@@ -45,7 +45,7 @@ save(ozone_la_california,file = "Intermediate/ozone_la_california.Rdata")
 ```
 
 
-```{r}
+```{r load_limited_epa_ozone}
 # Load Limited Dataset
 load("Intermediate/ozone_la_california.Rdata")
 

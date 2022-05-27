@@ -1,0 +1,1355 @@
+---
+title: "CO2-Analysis-with-PCA-and-KPCA"
+author: "Callum Weinberg"
+date: "May 26, 2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Packages
+
+Install the following libraries to run this project. ncdf4 is only needed if the first code chunk is to be run.
+
+```{r libraries, message = FALSE}
+# Data loading
+library(ncdf4)
+
+# Data cleaning and manipulation
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(rematch)
+library(lubridate)
+
+# Plotting
+library(ggplot2)
+library(devtools)
+#install_github("vqv/ggbiplot")
+library(ggbiplot)
+library(cowplot)
+
+# Geographic Mapping
+library(tmap)
+library(sf)
+
+# Modeling
+library(pls)
+library(kernlab)
+library(car)
+
+# Other
+library(knitr)
+```
+
+## Load the Vulcan CO2 Data
+
+The below code chunk processes the raw Vulcan CO2 data. The data sets are very large (80 files, approximately 30 GB in total size). If you'd like to rerun/change this portion of the code, you will have to download the data. See Raw/Vulcan_CO2/March2014/List_of_Files.txt for a list of the files.
+
+```{r load_vulcan_co2, eval = FALSE}
+# Indicate String Path
+path = "Raw/Vulcan_CO2/March2014/"
+
+# Get a list of files from the folder
+files_list = list.files(path)
+
+# Specify the name of the variable to be accessed
+# there are multiple variable available so this is
+# necessary
+dname = "carbon_emissions"
+
+# Create a dataframe to store the data from each file
+combined_df = data.frame(Type = "Holder", 
+                        FileName = "holder",
+                        CO2 = NA,
+                        CO2Units = NA,
+                        Time = NA,
+                        TimeUnits = NA)
+
+# Loop over all files
+for(i in files_list){
+  
+  # Get Type
+  type = 
+    str_remove(
+      str_remove(
+        str_extract(i,"1km\\..+\\.mn"),
+        "1km\\."),
+      "\\.mn")
+
+  
+  # Open the nc file type
+  nc =  nc_open(paste0(path,i))
+  
+  # Get Spacial and Time Data
+  x = ncvar_get(nc,"x")
+  y = ncvar_get(nc,"y")
+  time = ncvar_get(nc,"time")
+  tunits = ncatt_get(nc,"time","units")
+  
+  # Get CO2 Data and Units
+  CO2 = ncvar_get(nc,dname)
+  dunits = ncatt_get(nc,dname,"units")
+  
+  # Limit to Chosen LA Boundaries (in Meters, Lambert_Conformal_Conic Projection)
+  # Code from Climatemodel_demo_CESM1.Rmd
+  ys = which(y >= -401193.688560163 & y <=  -353976.762435499)
+  xs = which(x >= -1942544.51850291 & x <= -1880037.22186271)
+
+  # Get Average over all censors in the chosen boundaries, by hour
+  CO2avg = apply(CO2[xs,ys,],3,function(i) mean(i, na.rm = TRUE))
+  
+  # Create Dataframe of data to append
+  forappend = data.frame(Type = rep(type,12),
+                         FileName = rep(i,12),
+                         CO2 = CO2avg,
+                         CO2Units = rep(dunits$value,12),
+                         Time = time,
+                         TimeUnits = rep(tunits$value,12))
+  
+  # Add the new data to the previous data
+  combined_df = rbind(combined_df,forappend)
+  
+  # Clean out reused variables
+  remove(type,nc,x,y,time,tunits,CO2,dunits,ys,xs,CO2avg,forappend)
+}
+
+# Save out so this code does not need to be rerun often
+# took about 30 minutes on my machine
+save(combined_df,file = "Intermediate/CO2_Long_v1.Rdata")
+```
+
+Start with the below code chunk. The CO2 data is in long form. The date variable is cleaned and set to Pacific Standard time. The CO2 data is reshaped wide as well for use in the modeling portion of the reports.
+
+```{r create_long_wide_co2}
+# Load the Output from Above. Takes 20-30 minutes to run, avoid
+# rerunning if possible
+load(file = "Intermediate/CO2_Long_v1.Rdata")
+
+# Remove top Row
+CO2_Long_V1 = combined_df[-c(1),]
+
+# Cleant The Date Variable
+CO2_Long_V1 = CO2_Long_V1 %>%
+  mutate(Date.Time = as.POSIXct(Time*3600,origin='2010-01-01 00:00:00')) %>%
+  mutate(Date.Time = Date.Time - hours(8) - minutes(30))
+
+# Wide Format
+CO2_Wide_V1 = CO2_Long_V1 %>%
+  select(Type,CO2,Date.Time) %>%
+  pivot_wider(names_from = Type, values_from = CO2)
+  
+save(CO2_Wide_V1,file = "Intermediate/CO2_Wide_v1_using.Rdata")
+remove(combined_df)
+```
+
+
+## Load the EPA Ozone Data
+
+Similar to the Vulcan data, the EPA Ozone data is large (but only about 2 GB). This chunk can be skipped. If you would like to run it, unzip the "Raw/EPA_Air_Data/hourly_44201_2014.zip" file.
+
+```{r load_epa_ozone, eval = FALSE}
+# Load full dataest. It is 2 GB,
+# So have written this code in such a way that
+# this code chunk should only be run once
+ozone_full = read.csv("Raw/EPA_Air_Data/hourly_44201_2014.csv", header = TRUE)
+
+# Limit it to Los Angeles County
+ozone_la_california = ozone_full %>%
+  filter(State.Name == "California", County.Name == "Los Angeles")
+
+# Remove the large Dataset
+remove(ozone_full)
+
+# Save for future use
+save(ozone_la_california,file = "Intermediate/ozone_la_california.Rdata")
+```
+
+The ozone data is limited to Los Angeles above. In the below code, it is limited to March 3rd, and only the observations that correspond to the WGS84 datum.
+
+```{r load_limited_epa_ozone}
+# Load Limited Dataset
+load("Intermediate/ozone_la_california.Rdata")
+
+# Limit the Data to March, 2014
+# Limit to Data from the WGS 1984 Projection
+ozone_la_california_limited = ozone_la_california %>%
+  filter(substr(Date.Local,1,7) == "2014-03") %>%
+  filter(Datum == "WGS84")
+```
+
+
+The below code plots the ozone monitors Additionally, a transformation of the WGS84 to Lambert Conformal Conic is extracted in order to get the bounds of the CO2 data to keep (this transformation in meters is used in the Vulcan Data code chunk). Also a shapefile for CA counties is loaded for the mapping.
+
+```{r plot_ozone_monitors, echo = FALSE}
+# Get LA County Censor Locations
+# And convert to an SF type object for mapping
+ozone_la_california_lat_lons = ozone_la_california %>%
+  select(Longitude,Latitude,Site.Num) %>%
+  distinct() %>% 
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+# Use this to limit CO2 data
+lcc = st_crs("+proj=lcc +lat_1=20 +lat_2=60 +lat_0=40 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +datum=NAD83 +units=m no_defs")
+meters = st_transform(ozone_la_california_lat_lons, crs = lcc)
+
+# Load Shapefile
+la_county_sf = st_read("Raw/ca-county-boundaries/CA_Counties/CA_Counties_TIGER2016.shp") %>%
+  filter(NAMELSAD == "Los Angeles County")
+
+# Plot the Monitors
+ozone_monitor_plot = ggplot() +
+  geom_sf(data = la_county_sf) +
+  geom_sf(data = ozone_la_california_lat_lons, size = 0.9, aes(color = "maroon")) +
+  scale_color_identity(guide = "legend",
+                       name = "",
+                       labels = "Ozone Monitors") +
+  theme_minimal() +
+  coord_sf(crs = 4326) +
+  labs(x = "longitude",
+       y = "latitude",
+       title = "Los Angeles Ozone Monitors EPA Data")
+
+# Exclude Lancaster (9033) and Santa Clarita (6012)
+# Monitors from the Data Aggregation
+png(filename = "Images/ozone_monitor_plot.png", width = 480, height = 480)
+ozone_monitor_plot
+dev.off()
+ozone_monitor_plot
+
+remove(ozone_la_california_lat_lons,lcc,meters,la_county_sf,ozone_monitor_plot)
+```
+
+The average ozone by hour (excluding two site monitors that are in the northern portion of LA county) over the monitors is calculated save saved to the Intermediate folder for future use. The Date.Time variable is converted to be of the same form as in the CO2 data.
+
+```{r average_ozone}
+# Get the Average Ozone by date and hour
+ozone_la_california_collapsed = ozone_la_california_limited %>%
+  filter(Site.Num != 9033 & Site.Num != 6012) %>%
+  group_by(Date.Local,Time.Local,Units.of.Measure, Datum) %>%
+  dplyr::summarise(Sample.Measurement = mean(Sample.Measurement)) %>%     # Need to specify dplyr here, otherwise package issues
+  as.data.frame() %>%
+  #unite(Date.Time, Date.Local, Time.Local, sep = "-", remove = TRUE) %>%
+  mutate(Date.Time = paste0(Date.Local, "-", Time.Local)) %>%            
+  mutate(Date.Time = str_replace(Date.Time,":","-")) %>%
+  mutate(Date.Time = ymd_hm(Date.Time)) %>%
+  select(-Date.Local,-Time.Local)
+
+
+# Save out
+save(ozone_la_california_collapsed,file = "Intermediate/Ozone_CA_LA.Rdata")
+remove(ozone_la_california,ozone_la_california_limited)
+```
+
+## Merge Datasets
+
+The CO2 and Ozone data sets are merged (wide format) below.
+
+```{r merge_datasets, echo = FALSE}
+# Merge
+Ozone_CO2_Combined = merge(ozone_la_california_collapsed,CO2_Wide_V1, 
+                        by.x = "Date.Time", 
+                        by.y = "Date.Time", all.x = FALSE)
+
+# Convert Date.Time to Date Class in R
+Ozone_CO2_Combined = Ozone_CO2_Combined %>%
+  mutate(Date.Time = as_datetime(Date.Time))
+remove(ozone_la_california_collapsed,CO2_Wide_V1)
+```
+
+
+## Save Out Data
+
+Save out the main dataframe for graphic, Ozone_CO2_Combined (and a long version for graphic). Additionally save out the model_data object for PCA, KPCA, and modeling.
+
+```{r create_project_datasets, echo = FALSE}
+## Full Dataset
+save(Ozone_CO2_Combined, file = "Intermediate/Ozone_CO2_Combined.Rdata")
+
+## Long version for CO2 Only (for EDA Graphs)
+Ozone_CO2_Combined_Long = Ozone_CO2_Combined %>%
+  select(Date.Time,airport,commercial,elec_prod,industrial,nonroad,onroad,
+         rail,residential) %>%
+  pivot_longer(c(airport,commercial,elec_prod,industrial,nonroad,onroad,
+         rail,residential),names_to = "Type",values_to="CO2") %>%
+  as.data.frame()
+# Save out
+save(Ozone_CO2_Combined_Long, file = "Intermediate/Ozone_CO2_Combined_Long.Rdata")
+
+## Scaled Long Version for CO2 Only (For EDA Graphs)
+Ozone_CO2_Combined_Long_Scaled = Ozone_CO2_Combined %>%
+  select(airport,commercial,elec_prod,industrial,nonroad,onroad,
+         rail,residential) %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  cbind(Ozone_CO2_Combined$Date.Time) %>%
+  as.data.frame() %>%
+  dplyr::rename(Date.Time = V9) %>%
+  mutate(Date.Time = as_datetime(Date.Time))  %>%
+  pivot_longer(c(airport,commercial,elec_prod,industrial,nonroad,onroad,
+         rail,residential),names_to = "Type",values_to="CO2") %>%
+  as.data.frame()
+# Save Out
+save(Ozone_CO2_Combined_Long_Scaled, file = "Intermediate/Ozone_CO2_Combined_Long_Scaled.Rdata")
+
+
+## Model Data
+# Drop Cement and CMV Which Have no CO2 Information
+# And drop Rail which is constant
+var(Ozone_CO2_Combined$rail)
+
+model_data = Ozone_CO2_Combined %>%
+  select(-c(cement,cmv,rail)) %>%              # Drop, not covariats
+  select(-c(Date.Time,Units.of.Measure,Datum)) # Drop, not part of PCA/Regression
+
+# Save model data
+save(model_data,file = "Intermediate/model_data.Rdata")
+```
+
+## Exploratory Data analysis
+
+The below sections produce EDA plots for the report. Note that the code to save the image out is coded out in the below segments (i.e. the png() function and the dev.off() functions). Uncomment these lines of code to save the graphs to the Images folder.
+
+# Time Series plot of data
+
+```{r ts_plot}
+## Plot Ozone Data for this Time Period
+ozone_ts = ggplot(data = Ozone_CO2_Combined, mapping = aes(x = Date.Time, y = Sample.Measurement)) +
+  geom_line() +
+  labs(x = "Date", y = "Ozone (Parts Per Million)") +
+  #labs(title = "Average Ozone PPM Across L.A. \nMeasured in Parts Per Milllion\nHourly, March 9th - March 16th 2014") +
+  scale_x_datetime(breaks = scales::breaks_pretty(12)) +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=14,face="bold"))
+
+## Plots for report
+#png(filename = "Images/Ozone_TS_Plot.png", width = 960, height = 480)
+ozone_ts
+#dev.off()
+
+
+## Plot CO2 Data for this Time Period, Not Scaled
+co2_unscaled_plot = ggplot(data = Ozone_CO2_Combined_Long, aes(x = Date.Time, y = CO2, color = Type)) +
+  geom_line() +
+  labs(x = "Date", y = "CO2 Emissions (Metric Tons)") +
+  #labs(title = "Average CO2 Across L.A. Sensors\nMeasured in Metric Tons\nHourly, March 9th - March 16th 2014") +
+  scale_x_datetime(breaks = scales::breaks_pretty(12)) +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=14,face="bold"))
+
+## Plot for report
+#png(filename = "Images/CO2_TS_Plot_Not_Scaled.png", width = 960, height = 480)
+co2_unscaled_plot
+#dev.off()
+
+## Plot CO2 Data for this Time Period, Not Scaled
+co2_scaled_plot = ggplot(data = Ozone_CO2_Combined_Long_Scaled, aes(x = Date.Time, y = CO2, color = Type)) +
+  geom_line(size = .3) +
+  labs(x = "Date", y = "CO2 Emissions (Scaled and Centered)") +
+  #labs(title = "Average CO2 Across L.A. Sensors\nMeasured in Metric Tons\nHourly, March 9th - March 16th 2014") +
+  scale_x_datetime(breaks = scales::breaks_pretty(12)) +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=14,face="bold"))
+
+## Plot for report
+#png(filename = "Images/CO2_TS_Plot_Scaled.png", width = 960, height = 480)
+co2_scaled_plot
+#dev.off()
+
+
+remove(ozone_ts,co2_unscaled_plot,co2_scaled_plot)
+```
+
+# ACFs and PACFs for Ozone
+
+```{r acf_pacf_ozone}
+## Sample ACF
+ozone_acf_list = acf(Ozone_CO2_Combined$Sample.Measurement, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+ozone_acf = as.data.frame(do.call(cbind, ozone_acf_list))
+
+# Confidence Interval Line
+conf.level = 0.95
+ciline = qnorm((1 - conf.level)/2)/sqrt(length(Ozone_CO2_Combined$Sample.Measurement))
+
+# Plot
+ACF_Ozone_Graph = ggplot(data = ozone_acf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+
+## Sample PACF
+ozone_pacf_list = pacf(Ozone_CO2_Combined$Sample.Measurement, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+ozone_pacf = as.data.frame(do.call(cbind, ozone_pacf_list))
+
+# Plot
+PACF_Ozone_Graph = ggplot(data = ozone_pacf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "Partial ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+## Plots for Report
+#png(filename = "Images/acf_pacf_ozone.png", width = 960, height = 480)
+plot_grid(ACF_Ozone_Graph,PACF_Ozone_Graph, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+#dev.off()
+
+remove(ozone_acf_list,ozone_acf,conf.level,ciline,ACF_Ozone_Graph,
+       ozone_pacf_list,ozone_pacf,PACF_Ozone_Graph)
+```
+
+# ACFs and PACFs for Airport
+
+```{r acf_pacf_airport}
+## Sample ACF
+airport_acf_list = acf(Ozone_CO2_Combined$airport, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+airport_acf = as.data.frame(do.call(cbind, airport_acf_list))
+
+# Confidence Interval Line
+conf.level = 0.95
+ciline = qnorm((1 - conf.level)/2)/sqrt(length(Ozone_CO2_Combined$airport))
+
+# Plot
+ACF_Airport_Graph = ggplot(data = airport_acf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+
+## Sample PACF
+airport_pacf_list = pacf(Ozone_CO2_Combined$airport, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+airport_pacf = as.data.frame(do.call(cbind, airport_pacf_list))
+
+# Plot
+PACF_Airport_Graph = ggplot(data = airport_pacf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "Partial ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+## Plots for Report
+#png(filename = "Images/acf_pacf_airport.png", width = 960, height = 480)
+plot_grid(ACF_Airport_Graph,PACF_Airport_Graph, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+#dev.off()
+
+remove(airport_acf_list,airport_acf,conf.level,ciline,ACF_Airport_Graph,airport_pacf_list,airport_pacf,PACF_Airport_Graph)
+
+```
+
+# ACFs and PACFs for Residential
+
+```{r acf_pacf_residential}
+## Sample ACF
+residential_acf_list = acf(Ozone_CO2_Combined$residential, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+residential_acf = as.data.frame(do.call(cbind, residential_acf_list))
+
+# Confidence Interval Line
+conf.level = 0.95
+ciline = qnorm((1 - conf.level)/2)/sqrt(length(Ozone_CO2_Combined$residential))
+
+# Plot
+ACF_Residential_Graph = ggplot(data = residential_acf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+
+## Sample PACF
+residential_pacf_list = pacf(Ozone_CO2_Combined$residential, plot = FALSE, lag.max = 48)
+
+# Put into Dataframe
+residential_pacf = as.data.frame(do.call(cbind, residential_pacf_list))
+
+# Plot
+PACF_Residential_Graph = ggplot(data = residential_pacf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  geom_hline(aes(yintercept = ciline), linetype = 2, color = 'darkblue') + 
+  geom_hline(aes(yintercept = -ciline), linetype = 2, color = 'darkblue') +
+  labs(x = "lag", y = "Partial ACF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+## Plots for Report
+#png(filename = "Images/acf_pacf_residential.png", width = 960, height = 480)
+plot_grid(ACF_Residential_Graph,PACF_Residential_Graph, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+#dev.off()
+
+remove(residential_acf_list,residential_acf,conf.level,ciline,ACF_Residential_Graph,residential_pacf_list,residential_pacf,PACF_Residential_Graph)
+```
+
+## CCF for Ozone vs Airport and Residential
+```{r ccf}
+## CCF Ozone Airport
+ozone_airport_ccf_list = ccf(Ozone_CO2_Combined$Sample.Measurement,Ozone_CO2_Combined$airport, plot = FALSE, lag.max = 48,
+                             type = "correlation")
+
+# Put into Dataframe
+ozone_airport_ccf = as.data.frame(do.call(cbind, ozone_airport_ccf_list))
+
+# Plot
+CCF_Ozone_Airport_Graph = ggplot(data = ozone_airport_ccf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  labs(x = "lag", y = "CCF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+
+## CCF Ozone Residential
+ozone_residential_ccf_list = ccf(Ozone_CO2_Combined$Sample.Measurement,Ozone_CO2_Combined$residential, plot = FALSE, lag.max = 48,
+                             type = "correlation")
+
+# Put into Dataframe
+ozone_residential_ccf = as.data.frame(do.call(cbind, ozone_residential_ccf_list))
+
+# Plot
+CCF_Ozone_Residential_Graph = ggplot(data = ozone_residential_ccf, mapping = aes(x = as.numeric(lag), y = as.numeric(acf))) +
+  geom_hline(aes(yintercept = 0)) +
+  geom_segment(mapping = aes(xend = as.numeric(lag), yend = 0)) +
+  labs(x = "lag", y = "CCF") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.title=element_text(size=10,face="bold"))
+
+
+
+## Plots for Report
+png(filename = "Images/ccf_ozone_airport_residential.png", width = 960, height = 480)
+plot_grid(CCF_Ozone_Airport_Graph,CCF_Ozone_Residential_Graph, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+dev.off()
+
+remove(ozone_airport_ccf_list,ozone_airport_ccf,CCF_Ozone_Airport_Graph,ozone_residential_ccf_list,
+       ozone_residential_ccf_list,ozone_residential_ccf,CCF_Ozone_Residential_Graph)
+```
+
+## PCA
+
+Analysis regardin PCA is performed in the following sections.
+
+# Prepare Data
+
+The X matrix is the CO2 data for airport, commercial, electricity production, industrial, nonroad, onroad, and residential. Rail is excluded as it is invariate across the period. CMV and Cement where not reported for the sensors for the specified dates and geographic location.
+
+The data is scaled and centered, which is typical for PCA.
+
+```{r load_data}
+# Create Matrices
+X_Matrix = model_data[,2:ncol(model_data)]
+Y_Matrix = as.matrix(model_data[,1])
+
+# Get Column of Hours
+X_hours = hour(Ozone_CO2_Combined$Date.Time)
+
+# Center and Scale Data
+X_scale_center = scale(X_Matrix,scale = TRUE, center = TRUE)
+```
+
+The following sections perform PCA via a number of methods, as discussed in the report. Each method is repeated 1000 times as each iteration can randomly fluctuate based on the machine running it (the metric is processing time on the machine).
+
+# PCA using Base R (Stats Package)
+
+```{r pca_prcomp}
+## Use prcomp function To Get PC and Projection
+# Measure Computational Time - 1000 Iterations
+time_prcomp_pca = data.frame(time = rep(NA,1000),method = rep("prcomp",1000))
+for (i in 1:1000) {
+  start = Sys.time() 
+  
+  # PR Comp Function. To be consistent with other methods,
+  # Use the already scaled and centered version
+  prcomp_pca = prcomp(X_scale_center,scale = FALSE, center = FALSE)
+  
+  # Measure Time
+  end = Sys.time()
+  time_prcomp_pca[i,1] = end-start
+  remove(start,end,prcomp_pca)
+}
+
+# Rename/Extract PC and Project Matrices
+prcomp_pca = prcomp(X_scale_center,scale = FALSE, center = FALSE)
+prcomp_pc = prcomp_pca$x
+prcomp_proj = prcomp_pca$rotation
+```
+
+# PCA Using Eigenvalue Decomposition
+
+```{r pca_eigen}
+## Use eigen Function in R to get PC and Projection
+# Measure Computational Time - 1000 iterations
+time_eigen_pca = data.frame(time = rep(NA,1000),method = rep("eigen",1000))
+for (i in 1:1000) {
+  start = Sys.time() 
+  
+  # Calculate Covariance Matrix of Centered and scaled data
+  C = t(X_scale_center)%*%X_scale_center
+  
+  # Use eigen function to get eigen vectors of C
+  # Innerproduct of X and eigenvectors to get principal components
+  eigen_pc = X_scale_center%*%eigen(C)$vectors
+  
+  # Measure Time
+  end = Sys.time()
+  time_eigen_pca[i,1] = end-start
+  remove(start,end,C,eigen_pc)
+}
+
+# The projection matrix is just the eigenvectors
+# Excluding this from computation time since it 
+# is not a necessary step (just renaming values
+# For consistency)
+C = t(X_scale_center)%*%X_scale_center
+eigen_pc = X_scale_center%*%eigen(C)$vectors
+eigen_proj = eigen(C)$vectors
+
+# Extract Eigenvalues as well
+eigen_C_values = eigen(C)$values
+```
+
+# PCA Using Singular Value Decomp
+
+```{r pca_SVD}
+## Use svd Function in R to get PC and Projection
+# Measure Computational Time - 1000 iterations
+time_svd_pca = data.frame(time = rep(NA,1000),method = rep("svd",1000))
+for (i in 1:1000) {
+  start = Sys.time() 
+  
+  # Perform SVD Using R Function
+  X_svd = svd(X_scale_center)
+  
+  # Get Principal Compents by m
+  svd_pc = X_svd$u%*%diag(X_svd$d)
+  
+  # Measure Time
+  end = Sys.time()
+  time_svd_pca[i,1] = end-start
+  remove(start,end,X_svd,svd_pc)
+}
+
+# Extract Values
+X_svd = svd(X_scale_center)
+svd_pc = X_svd$u%*%diag(X_svd$d)
+svd_singular_values = X_svd$d
+svd_eigenvalues = svd_singular_values^2
+svd_proj = X_svd$v
+```
+
+# PCA Using NIPALS Algorithm
+
+```{r pca_nipals}
+# Set Seed for Reproducibility (to randomly set t)
+set.seed(42)
+
+## Use Nipals Algorithm in R to get PC and Projection
+# Measure Computational Time - 1000 iterations
+time_nipals_pca = data.frame(time = rep(NA,1000),method = rep("nipals",1000))
+for (j in 1:1000) {
+  start = Sys.time() 
+  
+  # Initialize T and P matrices
+  n = nrow(X_scale_center)
+  p = ncol(X_scale_center)
+  T = matrix(NA, nrow = n, ncol = p)
+  P = matrix(NA, nrow = p, ncol = p)
+    
+  # Initialize Raw data Matrix as scaled, centered matrix
+  X = X_scale_center
+  
+  # Choose Threshold for convergence
+  epsilon = .000000001
+  # Initialize to something greater than epsilon
+  e = 1 
+  # Counter to see how many iterations it takes for convergence
+  counter = 0
+  
+  # Step 1: Initialize t
+  t_vec = matrix(rnorm(n,0,1),byrow = TRUE)
+  
+  for (i in 1:ncol(X)){
+    # Loop for Component
+    while(e > epsilon) {
+      
+      # Check how many loops occur
+      counter = counter + 1
+    
+      # Step 2: Calculate p vector
+      p_prime = t((t(t_vec)%*%X)*(as.numeric(1/(t(t_vec)%*%t_vec))))
+      
+      # Step 3: Rescale Loading Vector
+      p_prime = p_prime*(as.numeric(1/sqrt(t(p_prime)%*%p_prime)))
+      
+      # Step 4: Regress X onto Normalized Loading Vector
+      t_vec_new = X%*%p_prime*(as.numeric(1/t(p_prime)%*%p_prime))
+      
+      # Step 5: Check for Difference between t_vec and t_vec_new
+      e = sum((t_vec - t_vec_new)^2)
+      t_vec = t_vec_new
+    }
+    
+    # Step 6: Save Score and Loading vectors and deflate X
+    T[,i] = t_vec
+    P[,i] = p_prime
+    # Deflate X
+    X = X - t_vec%*%t(p_prime)
+    
+    # Reset e
+    e = 1
+  }
+  
+  # Measure Time
+  end = Sys.time()
+  time_nipals_pca[j,1] = end-start
+  
+  # Extract Values
+  nipals_pc = T
+  nipals_proj = P
+  
+  remove(start,end,n,p,T,P,X,epsilon,e,
+         counter,p_prime,t_vec,t_vec_new)
+}
+```
+
+
+# PCA via Kernlab Package (Linear Kernel)
+
+Note that the kernlab PCA, via vallidot kernel, was actually not found to be the same as the other methods. I am not sure why this is occuring: I don't believe any parameters (such as some scalar) are being provided.
+
+```{r pca_kernlab}
+## Use the kernlab package and linear kernel to get PC
+# Measure Computational Time - 1000 iterations
+time_kernlab_pca = data.frame(time = rep(NA,1000),method = rep("kernlab",1000)) 
+for (i in 1:1000){
+  start = Sys.time() 
+  
+  # Linear Kernel, Same as Regular PCA
+  kpca_kernlab_linear = kpca(~.,as.data.frame(X_scale_center),kernel="vanilladot",
+              kpar=list(),features=7)
+  
+  # Measure Time
+  end = Sys.time()
+  time_kernlab_pca[i,1] = end-start
+  remove(start,end,kpca_kernlab_linear)
+  
+}
+
+# Extract/Rename values
+kpca_kernlab_linear = kpca(~.,as.data.frame(X_scale_center),kernel="vanilladot",
+            kpar=list(),features=7)
+kernlab_pc = pcv(kpca_kernlab_linear)
+kernlab_proj = rotated(kpca_kernlab_linear)
+```
+
+
+# Plot Histograms of Processing time
+
+
+```{r pca_computational_time}
+# Create Dataframe for Plotting
+comp_df = rbind(time_prcomp_pca,time_eigen_pca,
+                time_svd_pca,time_kernlab_pca,time_nipals_pca)
+
+# Histogram for Single Variable
+computational_time_density_plot = 
+  ggplot(comp_df, aes(x = log(time), color = method, fill = method)) +
+  geom_density(alpha = 0.1) +
+  labs(x = "ln(Time) per Iteration", y = "Frequency") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 14),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+## Plot for report
+#png(filename = "Images/PCA_Computational_Time.png", width = 960, height = 480)
+computational_time_density_plot
+#dev.off()
+```
+
+## Confirm Methods produce same Principal Components
+
+
+```{r pc_confirmation}
+# Confirm Same Principal Components
+sum(abs(prcomp_pc)-abs(eigen_pc))
+sum(abs(prcomp_pc)-abs(svd_pc))
+sum(abs(prcomp_pc)-abs(nipals_pc))
+# Not the same, needs inspection
+sum(abs(prcomp_pc)-abs(xmatrix(kpca_kernlab_linear)))
+```
+
+# Scree Plot
+
+Below is the scree plot for this principal component analysis. The results are discussed in detail in the report
+```{r pca_scree_plot}
+# Percent of Variance Explained
+percent_variance_explained = 
+  data.frame(PC = seq(1,7,by=1), 
+             Percent_Variance = (svd_eigenvalues / sum(svd_eigenvalues)))
+
+# Create Scree Plot
+pca_scree = ggplot(data = percent_variance_explained, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  geom_text(aes(label = round(Percent_Variance,4)), size = 3, color = "red", nudge_y = -.05) +
+  scale_y_continuous(breaks = seq(0,.7,by = .1)) +
+  scale_x_continuous(breaks = seq(1,7,by = 1)) +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+## Plot for report
+#png(filename = "Images/PCA_Scree_Plot.png", width = 720, height = 480)
+pca_scree
+#dev.off()
+```
+
+
+# Biplot of Principal Components
+Similarly, interpretation and the results of the biplots are discussed in detail in the paper report.
+```{r pca_biplot}
+## Using ggbiplot package designed for PC object
+
+
+# Get Hours and Grouped Hours
+X_hours_df = data.frame(hours = X_hours) %>%
+  mutate(hour_group = ifelse(hours %in% c(21,22,23,0,1,2,3,4,5),"Night",
+                             ifelse(hours %in% c(15,16,17,18,19,20),"Evening",
+                                    ifelse(hours %in% c(6,7,8,9),"Morning","Mid-day"))))
+
+
+# Plot 1: Just Loading Vectors
+biplot_1_2_plain = ggbiplot(prcomp_pca)
+
+# Plot 2: Loading Vectors and Grouping by time of day
+biplot_1_2_groups = ggbiplot(prcomp_pca, labels=X_hours_df$hours, groups = X_hours_df$hour_group)
+
+# Plot 3: Loading vectors with Ellipses for groups
+biplot_1_2_groups_ellipses = 
+  ggbiplot(prcomp_pca, ellipse=TRUE,  labels=X_hours_df$hours, groups = X_hours_df$hour_group)
+
+# Biplot of 3rd and 4th Principal Components
+biplot_3_4_groups_ellipses = ggbiplot(prcomp_pca, choices=c(3,4), ellipse=TRUE,  labels=X_hours_df$hours, groups = X_hours_df$hour_group)
+
+
+## Plots for Report
+#png(filename = "Images/biplot_pc_1_2.png", width = 960, height = 480)
+plot_grid(biplot_1_2_plain,biplot_1_2_groups, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+#dev.off()
+
+#png(filename = "Images/biplot_pc_1_2_detailed.png", width = 480, height = 480)
+biplot_1_2_groups_ellipses
+#dev.off
+
+#png(filename = "Images/biplot_pc_3_4.png", width = 480, height = 480)
+biplot_3_4_groups_ellipses
+#dev.off
+
+```
+
+
+## Principal Component Regression
+
+```{r linear_model}
+# Illustrate why PCR is Useful Here
+model_linear_1 = lm(data = Ozone_CO2_Combined, Sample.Measurement ~ 
+                      airport + commercial + elec_prod + industrial + nonroad + onroad + residential)
+
+vif(model_linear_1)
+
+## Alternatively, VIF for PC
+# PCR Regression Using All Principal Componets
+df_example = data.frame(cbind(Y_Matrix,svd_pc))
+model_pc_example = lm(X1 ~ ., data = df_example)
+
+vif(model_pc_example)
+```
+
+There are clear issues with the linear model and multicollinearity, as illustrated by the high VIFs of some of the variables
+
+Below a linear model is fit for full set of principal components and a subset of four.
+
+```{r pcr_by_pc}
+# PCR Regression Using All Principal Componets
+pcr_all_pc = lm(Y_Matrix ~ svd_pc - 1)
+summary(pcr_all_pc)
+
+# PCR Regression Using 4 Principal Componets
+pcr_4_pc = lm(Y_Matrix ~ svd_pc[,c(1:4)] - 1)
+summary(pcr_4_pc)
+```
+
+Finally, PCR can also be done via the PLS package. The results are the same as performing PCA and then regressing on the Principal components, as is shown below.
+
+```{r pcr_pls_package}
+## PCR Regression Using PLS Package
+# This portion just illustrates that PCR function
+# can be used to achieve the same results
+pca_regression_model = V1 ~ airport + commercial + elec_prod + industrial + nonroad + onroad + residential
+pca_regression = pcr(pca_regression_model, data = as.data.frame(cbind(Y_Matrix,X_scale_center)))
+
+# Illustrating that the coefficients from
+# PCR package are the same as those produces when
+# fitting the linear model, after those coefficients
+# have been projected onto the subspace
+pcr_all_pc$coefficients %*% t(svd_proj)
+pca_regression$coefficients[,,7]
+```
+
+
+## KPCA
+
+# Define Gram Matcies
+
+Note. There appear to be issues with this code. Specifically, at the moment the resulting matrix for the RBF case has negative eigenvalues. Given it is symmetric, this means it is not positive definite which suggests that something is wrong in this code chunk
+
+```{r distance_matrices}
+# Euclidean Distance Matrix Formula
+#RBF: Define Euclidean Distance Matrix 
+euclidean_distance_function = function(M) {
+
+  # Define Result Matrix for Outer Product
+  result = matrix(NA,nrow = nrow(M),ncol = nrow(M))
+  
+  for(i in 1:nrow(M)) {
+    for(j in 1:nrow(M)) {
+      # Note: Taking sqrt to make proper
+      # euclidean distance. Some kernels (rbf and 
+      # rq) then square the terms.
+      # Could decrease computing time slightly
+      # By not calculating true euclidean
+      # distance here
+      result[i,j] = sqrt(sum((M[i,] - M[j,])^2))
+    }
+  }
+  # Return Result
+  eu_matrix = result
+  return(eu_matrix)
+}
+
+
+#Radial Basis Function Kernel
+rbf_kernel = function(M, theta) {
+
+  # The euclidean distance matrix is squared
+  # then multiplied by -sigma and exponentiated
+  gram = exp(-1*(euclidean_distance_function(M)^2)/theta)
+  return(gram)
+}
+
+# Below is what will be used in kPCA
+# q = rbf_kernel(X_scale_center,2)
+
+# Rational Quadratic Kernel
+rq_kernel = function(M,theta,alpha) {
+  gram = (1 + ((euclidean_distance_function(M)^2)/(theta*alpha)))^(-1*alpha)
+  return(gram)
+}
+
+# Below is what will be used in kPCA
+p = rq_kernel(X_scale_center,2,.5)
+
+```
+
+
+# KPCA RBF Kernel: Exploring how Changes in Sigma Effect Number of Principal Components
+
+```{r KPCA_rbf}
+## RBF, Sigma = .01
+# sigma is defined as the "inverse kernel width on Kernlab", i.e. is in the denominator
+kpca_kernlab_rbf_01 = kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
+            kpar=list(sigma=.01))
+
+kpcs_rbf_pc_01 = pcv(kpca_kernlab_rbf_01)
+kpcs_rbf_eig_01 = eig(kpca_kernlab_rbf_01)
+
+# Percent of Variance Explained
+percent_variance_explained_rbf_01 = 
+  data.frame(PC = seq(1,length(kpcs_rbf_eig_01),by=1), 
+             Percent_Variance = (kpcs_rbf_eig_01 / sum(kpcs_rbf_eig_01)))
+
+# Create Scree Plot
+kpca_rbf_scree_01 = ggplot(data = percent_variance_explained_rbf_01, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+# plot the output
+#png(filename = "Images/rbf_sigma_01.png", width = 480, height = 480)
+kpca_rbf_scree_01
+#dev.off()
+
+
+## RBF, Sigma = 1
+# sigma is defined as the "inverse kernel width on Kernlab", i.e. is in the denominator
+kpca_kernlab_rbf_1 = kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
+            kpar=list(sigma=1))
+
+kpcs_rbf_pc_1 = pcv(kpca_kernlab_rbf_1)
+kpcs_rbf_eig_1 = eig(kpca_kernlab_rbf_1)
+
+# Percent of Variance Explained
+percent_variance_explained_rbf_1 = 
+  data.frame(PC = seq(1,length(kpcs_rbf_eig_1),by=1), 
+             Percent_Variance = (kpcs_rbf_eig_1 / sum(kpcs_rbf_eig_1)))
+
+# Create Scree Plot
+kpca_rbf_scree_1 = ggplot(data = percent_variance_explained_rbf_1, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+# Plot the output
+#png(filename = "Images/rbf_sigma_1.png", width = 480, height = 480)
+kpca_rbf_scree_1
+#dev.off()
+
+
+## RBF, Sigma = 2
+# sigma is defined as the "inverse kernel width on Kernlab", i.e. is in the denominator
+kpca_kernlab_rbf_2 = kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
+            kpar=list(sigma=2))
+
+kpcs_rbf_pc_2 = pcv(kpca_kernlab_rbf_2)
+kpcs_rbf_eig_2 = eig(kpca_kernlab_rbf_2)
+
+# Percent of Variance Explained
+percent_variance_explained_rbf_2 = 
+  data.frame(PC = seq(1,length(kpcs_rbf_eig_2),by=1), 
+             Percent_Variance = (kpcs_rbf_eig_2 / sum(kpcs_rbf_eig_2)))
+
+# Create Scree Plot
+kpca_rbf_scree_2 = ggplot(data = percent_variance_explained_rbf_2, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+# save the output
+#png(filename = "Images/rbf_sigma_2.png", width = 480, height = 480)
+kpca_rbf_scree_2
+#dev.off()
+
+
+## Measure relationship between sigma and number of PCs
+# required to get to 75% of variance explained
+
+# Define a list of sigmas to explore (l in project formula)
+sigma_list = seq(.01,2.1,by = .1)
+
+# Specify dataframe to add the number of PCs (technically loading vectors)
+# necessary
+rbf_df = data.frame(sigma = sigma_list, pc_count = rep(NA,length(sigma_list)))
+
+# Counter for loop
+counter = 0
+
+# Loop over each value
+for (i in sigma_list) {
+  counter = counter + 1
+  
+  # Perform KPCA with the specified value of sigma
+  kpca_kernlab_rbf = kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
+              kpar=list(sigma=i))
+  
+  # Calculate the cumulative variance, as provided
+  # by the normalized eigenvalues
+  cumeig = cumsum(eig(kpca_kernlab_rbf)/sum(eig(kpca_kernlab_rbf)))
+  
+  # Get the number of eigenvalues (i.e. PCs) necessary
+  # to get to 75%
+  number = length(cumeig[which(cumeig < .75)]) + 1
+
+  #store the variable
+  rbf_df[counter,2] = as.numeric(number)
+  
+  remove(kpca_kernlab_rbf,cumeig,number)
+}
+
+# Plot the Value of sigma by the variable
+pca_count_plot_rbf = ggplot(data = rbf_df, aes(x = sigma, y = pc_count)) + 
+  geom_point() +
+  geom_line() +
+  labs(x = "l", y = "# of Principal Components \n needed to explain 75% variation") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+  
+
+# Save the output
+#png(filename = "Images/rbf_varying_sigma.png", width = 960, height = 480)
+pca_count_plot_rbf
+#dev.off
+
+```
+
+
+# KPCA Polydot Kernel: Exploring how Changes in Degree Effect Number of Principal Components
+
+```{r kPCA_poly}
+## Poly, Degree = 1
+kpca_kernlab_poly_1 = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
+            kpar=list(degree = 1))
+
+kpcs_poly_1 = pcv(kpca_kernlab_poly_1)
+kpcs_poly_eig_1 = eig(kpca_kernlab_poly_1)
+
+# Percent of Variance Explained
+percent_variance_explained_poly_1 = 
+  data.frame(PC = seq(1,length(kpcs_poly_eig_1),by=1), 
+             Percent_Variance = (kpcs_poly_eig_1 / sum(kpcs_poly_eig_1)))
+
+# Create Scree Plot
+kpca_poly_scree_1 = ggplot(data = percent_variance_explained_poly_1, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+#png(filename = "Images/poly_degree_1.png", width = 480, height = 480)
+kpca_poly_scree_1
+#dev.off()
+
+
+## Poly, Degree = 2
+kpca_kernlab_poly_2 = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
+            kpar=list(degree = 2))
+
+kpcs_poly_2 = pcv(kpca_kernlab_poly_2)
+kpcs_poly_eig_2 = eig(kpca_kernlab_poly_2)
+
+# Percent of Variance Explained
+percent_variance_explained_poly_2 = 
+  data.frame(PC = seq(1,length(kpcs_poly_eig_2),by=1), 
+             Percent_Variance = (kpcs_poly_eig_2 / sum(kpcs_poly_eig_2)))
+
+# Create Scree Plot
+kpca_poly_scree_2 = ggplot(data = percent_variance_explained_poly_2, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+#png(filename = "Images/poly_degree_2.png", width = 480, height = 480)
+kpca_poly_scree_2
+#dev.off()
+
+
+## Poly, Degree = 10
+kpca_kernlab_poly_10 = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
+            kpar=list(degree = 10))
+
+kpcs_poly_10 = pcv(kpca_kernlab_poly_10)
+kpcs_poly_eig_10 = eig(kpca_kernlab_poly_10)
+
+# Percent of Variance Explained
+percent_variance_explained_poly_10 = 
+  data.frame(PC = seq(1,length(kpcs_poly_eig_10),by=1), 
+             Percent_Variance = (kpcs_poly_eig_10 / sum(kpcs_poly_eig_10)))
+
+# Create Scree Plot
+kpca_poly_scree_10 = ggplot(data = percent_variance_explained_poly_10, aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+#png(filename = "Images/poly_degree_10.png", width = 480, height = 480)
+kpca_poly_scree_10
+#dev.off()
+
+
+## Measure relationship between sigma and number of PCs
+# required to get to 50% of variance explained
+
+# Define a list of degrees
+degree_list = seq(1,15,by = 1)
+
+# create dataframe to capture the results
+poly_df = data.frame(poly = degree_list, pc_count = rep(NA,length(degree_list)))
+
+# Counter for loop
+counter = 0
+
+for (i in degree_list) {
+  counter = counter + 1
+  
+  # Perform kpca with the polynomial kernel
+  kpca_kernlab_poly = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
+            kpar=list(degree = i))
+  
+  # Calculate the cumulative sum of the normalized eigenvalues
+  cumeig = cumsum(eig(kpca_kernlab_poly)/sum(eig(kpca_kernlab_poly)))
+  
+  #measure how many PCs are necessary to get to over 75% of variance explained
+  number = length(cumeig[which(cumeig < .75)]) + 1
+
+  poly_df[counter,2] = as.numeric(number)
+  
+  remove(kpca_kernlab_poly,cumeig,number)
+}
+
+# Plot the output
+pca_count_plot_poly = ggplot(data = poly_df, aes(x = poly, y = pc_count)) + 
+  geom_point() +
+  geom_line() +
+  labs(x = "Degree", y = "# of Principal Components \n needed to explain 75% variation") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+
+# Save the output
+#png(filename = "Images/poly_varying_degree.png", width = 960, height = 480)
+pca_count_plot_poly
+#dev.off
+
+```

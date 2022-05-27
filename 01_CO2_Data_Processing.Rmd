@@ -1,5 +1,5 @@
 ---
-title: "Mess_Around"
+title: "01_CO2_Data_Processing.Rmd"
 author: "Callum Weinberg"
 date: "May 8, 2022"
 output: pdf_document
@@ -20,7 +20,7 @@ library(tidyr)
 ```
 
 
-```{r get_CO2}
+```{r load_vulcan_co2, eval = FALSE}
 # Indicate String Path
 path = "Raw/Vulcan_CO2/March2014/"
 
@@ -94,7 +94,7 @@ save(combined_df,file = "Intermediate/CO2_Long_v1.Rdata")
 ```
 
 
-```{r Create_Long_and_Wide_Files}
+```{r create_long_wide_co2}
 # Load the Output from Above. Takes 20-30 minutes to run, avoid
 # rerunning if possible
 load(file = "Intermediate/CO2_Long_v1.Rdata")
