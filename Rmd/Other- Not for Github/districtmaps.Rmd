@@ -1,0 +1,206 @@
+---
+title: "District - test"
+author: "Laurel Abowd"
+date: "7/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, warnings = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(tmap)
+library(lubridate)
+library(gstat)
+library(raster)
+library(maptools)
+```
+
+```{r}
+# Load district shapefiles
+setwd("Z:/projects/11051 - Environmental health and achievement/abowd_R/RawData/district_shapefile")
+
+ca_districts <- st_read("DistrictAreas1819.shp") %>% dplyr::select(-OBJECTID)
+```
+
+```{r}
+# Select elementary and unified districts
+ca_districts_elementaryandunified <- ca_districts %>% 
+  filter(DistrictTy != "High")
+
+# Select elementary districts
+ca_districts_elementary <- ca_districts %>% 
+  filter(DistrictTy == "Elementary")
+
+# Select unified districts
+ca_districts_unified <- ca_districts %>% 
+  filter(DistrictTy == "Unified")
+
+# Select high districts
+ca_districts_high <- ca_districts %>% 
+  filter(DistrictTy == "High")
+```
+
+```{r}
+# Map elementary and unified districts 
+ggplot() +
+  geom_sf(data = ca_districts_elementaryandunified) +  
+  theme_minimal() +
+  coord_sf(crs = 3857) +
+  labs(x = "longitude",
+       y = "latitude",
+       title = "CA Elementary and Unified School Districts 2018-19")
+
+ggplot() +
+  geom_sf(data = ca_districts_elementary) +  
+  theme_minimal() +
+  coord_sf(crs = 3857) +
+  labs(x = "longitude",
+       y = "latitude",
+       title = "CA Elementary Districts 2018-19")
+
+
+ggplot() +
+  geom_sf(data = ca_districts_unified) +  
+  theme_minimal() +
+  coord_sf(crs = 3857) +
+  labs(x = "longitude",
+       y = "latitude",
+       title = "CA Unified School Districts 2018-19")
+
+ggplot() +
+  geom_sf(data = ca_districts_high) +  
+  theme_minimal() +
+  coord_sf(crs = 3857) +
+  labs(x = "longitude",
+       y = "latitude",
+       title = "CA High School Districts 2018-19")
+
+```
+
+```{r}
+# Load daily PM 2.5 (88101) output data compiled from EPA. 
+setwd("Z:/projects/11051 - Environmental health and achievement/abowd_R/OutputData")
+
+pm2.5 <- read.csv("DailyPM2.5.csv") %>% dplyr::select(-X) %>% 
+  mutate(Date.Local = date(Date.Local)) %>% 
+  mutate(Month = month(Date.Local))
+
+# File contains monitors under both datums WGS84 and NAD83, need to transform. 
+pm2.5_sub_WGS84 <- pm2.5 %>% 
+  filter(Datum == "WGS84") %>% 
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+pm2.5_NAD83_transformed <- pm2.5 %>% 
+  filter(Datum == "NAD83") %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4269) %>% 
+  st_transform(crs = st_crs(pm2.5_sub_WGS84)) # Transformed to WGS84
+
+pm2.5_WGS84 <- rbind(pm2.5_sub_WGS84, pm2.5_NAD83_transformed) %>% 
+  mutate(Datum = "WGS84")
+```
+
+```{r}
+# Select PM2.5 data for September 2018
+pm2.5_sept2018 <- pm2.5_WGS84 %>% 
+  filter(Year == "2018" & Month =="9")
+
+```
+
+```{r}
+# Map elementary and unified school districts and September 2018 PM2.5 monitors
+ggplot() +
+  geom_sf(data = ca_districts_elementaryandunified) +  
+  geom_sf(data = pm2.5_sept2018, size = 0.9, aes(color = "maroon")) +
+  scale_color_identity(guide = "legend",
+                       name = "",
+                       labels = "PM2.5 Monitor") +
+  theme_minimal() +
+  coord_sf(crs = 3857) +
+  labs(x = "longitude",
+       y = "latitude",
+       title = "CA Elementary and Unified School Districts 2018-19")
+
+```
+
+```{r}
+# Create interactive map. 
+tmap_mode(mode = "view")
+
+tm_shape(ca_districts_elementaryandunified) +
+  tm_fill("grey", id = "DistrictNa") +
+  tm_borders("black") +
+  tm_shape(pm2.5_sept2018) +
+  tm_dots("maroon", id = "") 
+```
+
+
+# Centroids
+## Since districts don't change much year to year, I'll use the 2018-2019 districts for PM2.5 interpolation.
+
+```{r}
+# Find elementary and unified district centroids
+centroids <- ca_districts_elementaryandunified %>% 
+  st_centroid(of_largest_polygon = TRUE)  # for districts composed of multiple polygons, use the largest
+
+# Since some districts are curved, some centroids fall outside of the district.
+# For those centroids outside the district, this function will force them onto the polygon.
+
+st_centroid_within_poly <- function (poly) {
+  ctrd <- st_centroid(poly, of_largest_polygon = TRUE)
+  in_poly <- diag(st_within(ctrd, poly, sparse = F))
+  st_geometry(ctrd[!in_poly,]) <- st_geometry(st_point_on_surface(poly[!in_poly,]))
+  ctrd
+}
+
+# Run function on elementary and unified school districts.
+centroids_within_poly <- st_centroid_within_poly(ca_districts_elementaryandunified)
+
+# Export centroids as shapefiles
+centroids_districts <- centroids_within_poly[,-(17:66)]
+# st_write(centroids_districts, "districts_elmntry_unified.shp")
+
+```
+
+```{r}
+# Find high school district centroids
+centroids_high <- ca_districts_high %>% 
+  st_centroid(of_largest_polygon = TRUE)  # for districts composed of multiple polygons, use the largest
+
+# Since some districts are curved, some centroids fall outside of the district.
+
+# Run function from above on high school districts.
+centroids_within_poly_high <- st_centroid_within_poly(ca_districts_high)
+
+# Export centroids as shapefiles
+centroids_districts_high <- centroids_within_poly_high[,-(17:66)]
+# st_write(centroids_districts_high, "districts_high.shp")
+
+```
+
+
+```{r}
+# Find montly average pm2.5 for sept. 2018
+avg_pm2.5_sept2018 <- pm2.5_sept2018 %>% 
+  group_by(Local.Site.Name, County.Name) %>% 
+  summarize(monthly.avg.pm2.5 = mean(Arithmetic.Mean))
+
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = ca_districts_elementaryandunified) +  
+  geom_sf(data = centroids_within_poly, color = "cyan4", size = .5) +
+  geom_sf(data = pm2.5_sept2018, size = 0.9, aes(color = "maroon")) +
+  scale_color_identity(guide = "legend",
+                       name = "",
+                       labels = "PM2.5 Monitor") +
+  theme_minimal() +
+  coord_sf(crs = 3857) +
+  labs(x = "longitude",
+       y = "latitude",
+       title = "CA Elementary and Unified School Districts 2018-19")
+
+```
+
+

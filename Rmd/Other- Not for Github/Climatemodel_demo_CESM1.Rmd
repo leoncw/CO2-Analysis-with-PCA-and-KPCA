@@ -1,0 +1,217 @@
+---
+title: "Climate model_demo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## How to Read Climate Model Data in R
+
+This is a brief introduction to the R libraries and commands you'll need to read in and analyze output from climate/Earth system models. There are many other resources out there, if you'd like more information! I particularly like this set of tutorials, from the "R for Earth System Science" course at the University of Oregon:
+https://pjbartlein.github.io/REarthSysSci/netCDF.html
+
+The commands needed for manipulating netCDF files are contained in the "ncdf4" package in R, make sure this is loaded!
+
+This example assumes that we have already downloaded a netCDF file; I will provide two different examples here, each for a monthly surface air temperature file.
+
+1. Community Earth System Model (CESM) version 1
+
+The first example uses surface temperature ("TS") from a CESM1 simulation run over 1920-2005. The naming conventions for the CESM files are slightly different from the CMIP6 data we looked at in class: the bits of the filename tell you things about how the model was configured (for example "f09_g16" refers to the model resolution, "B20TR" means it's a coupled 'transient' simulation with time-varying CO2) that you don't really need to worry about here. The important bits are:
+- the number that appears right before "cam.h0", this is the ensemble member number (equivalent to the "r1i1p1" string in a CMIP filename); and
+- the date string at the end, in this case "192001-200512"; this is the range of years contained in the file, and will vary depending on the model and simulation.
+
+
+2. Coupled Model Intercomparison Project (CMIP6)
+
+The second example reads in surface temperature ("tas") from an arbitrary CMIP6 model: I picked the E3SM-1-0 model since it's another commonly used example. I've selected two files here because E3SM stored its output in smaller time "chunks" than our CESM1 example above, and I wanted to show you how to go about stitching together data from multiple files since that's a pretty common task one needs to carry out when working with these models. 
+
+
+NOTE: The "ncpath" variable below should be set to the directory where the netCDF file is located on YOUR computer!
+
+```{r readcesm}
+library(lubridate)
+library(ggplot2)
+library(tidyverse)
+library(chron)
+library(ncdf4)
+library(RColorBrewer)
+library(lattice)
+library(abind)
+
+# path and filename for data
+ncpath <- "C:/Users/truel/Documents/Bren/ESM 237/HW2_sample/HW2_sample/"   # path (directory)
+ncname <- "b.e11.B20TRC5CNBDRD.f09_g16.102.cam.h0.TS.192001-200512.nc"  # CESM1 filename
+ncfname <- paste(ncpath, ncname, sep="")
+dname <- "TS"  # this is the name of the variable you want to look at
+
+ncin <- nc_open(ncfname)
+print(ncin)
+```
+
+
+Using the print command, we can see some of the basic information about the data ("metadata"), like units, coordinates, etc.
+
+The next thing we need to do is to actually read in the data! This is done with the "ncvar_get" command. Let's start with the time, latitude, and longitude coordinates: since TS is a two-dimensional variable, these are the only coordinates needed. If you want to work with 3D fields like ocean temperature, winds, or soil moisture, then you'll also need an additional vertical coordinate (again, "print" is your friend to find out what those are called).
+
+The following commands read in the longitude and latitude information, and store the lengths of each axis in variables 'nlon' and 'nlat'.
+
+```{r readcoords}
+lon <- ncvar_get(ncin,"lon")
+nlon <- dim(lon)
+lat <- ncvar_get(ncin,"lat")
+nlat <- dim(lat)
+
+head(lat)
+head(lon)
+
+```
+
+Next we'll do the same thing with the time coordinate: this one takes a bit more attention, since the time units must be converted to R date format. Also an important note: if you're working with multiple climate models, the time units are probably different!! 
+
+```{r readtime}
+time <- ncvar_get(ncin,"time")
+tunits <- ncatt_get(ncin,"time","units")
+nt <- dim(time)
+
+print(tunits)
+```
+
+For CESM, the units of time are "days since 1920-01-01". Making things more complicated: the CESM model *calendar* doesn't use leap years! So I've used the below technique to convert this weird time data into something that R can work with more easily.
+
+The units of time are stored in "tunits", which contains two fields: hasatt, a logical variable, and units, the actual units themselves. The "value" field is simply a string, which we can use the "strsplit" function to split into parts and retrieve the portions of the starting date: in this case, 1920, 1 (January), and 1 (the first day of the month). I store these in the variables "tyear", "tmonth", and "tday" respectively.
+
+Why do this? Because then that year/month/day information can be supplied as an "origin" to the R chron command, to generate a standard R-format time vector.
+
+The full set of R commands thus described are:
+
+
+```{r formattime}
+tustr <- strsplit(tunits$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+rtime <- chron(time,origin=c(tmonth, tday, tyear))
+```
+
+OK now let's read in the CESM temperature data! This may take a while, depending on your computer and the size of the data file. It's also a good idea to get some attributes of the data: the full name ("long_name"), units, and the value used to fill in places where there are no data ("_FillValue"). 
+
+```{r readtemp}
+TS <- ncvar_get(ncin, "TS")
+dlname <- ncatt_get(ncin,dname,"long_name")
+dunits <- ncatt_get(ncin,dname,"units")
+fillvalue <- ncatt_get(ncin,dname,"_FillValue")
+```
+
+Now we have temperature loaded in and ready to be processed; the dimensions of the "TS" array are [lat x lon x time]. We can make a time slice through the data to see a map of surface temperature at a particular time: say, January 1920 (the first entry in the file).
+
+```{r slice}
+m <- 1
+tmp_slice <- TS[,,m]-273.15     # convert Kelvin to Celsius
+# levelplot of the slice
+grid <- expand.grid(lon=lon, lat=lat)
+cutpts <- c(-50,-40,-30,-20,-10,0,10,20,30,40,50)
+levelplot(tmp_slice ~ lon * lat, data=grid, at=cutpts, cuts=11, pretty=T, 
+  col.regions=(rev(brewer.pal(10,"RdBu"))))
+```
+
+Another common calculation is the time series of regionally averaged data from a particular location of interest (think HW 1, but with model output). To do this, select the parts of the data matrix corresponding to the latitudes and longitudes in your region (note: it's also possible to do this with a shapefile, but that was a longer example than we have time for now).
+
+Let's plot a box covering parts of southern California: 32-35N, 117-119W. **note: you'll also need to pay attention to whether the longitudes in the model are given in degrees E (0 to 360) or degrees W and E (-180 to 180). CESM uses 0-360 coordinates, so the longitude range we want is 241-243E.
+
+The R 'apply' function lets us compute the average over the region easily; here we specify 3 as the dimension over which to apply the mean, and this applies the average over all values corresponding to each time. As a bonus, I've also used the 'group_by' and 'summarize' functions to create annual temperatures from this data before plotting the time series; you can also just plot the raw monthly values if you prefer.
+
+```{r getregion}
+lats=which(lat >= 32 & lat <= 35)
+lons=which(lon >= 241 & lon <= 243)
+
+tsavg <- apply(TS[lons,lats,],3,mean)
+
+clim <- data.frame(time=rtime, tsavg=tsavg)
+yrclim = clim %>% group_by(year(rtime)) %>% summarize(Tann=mean(tsavg))
+yrclim$dt = unique(year(rtime))
+
+ggplot(yrclim, aes(dt, Tann-273.15))+geom_point()+labs(y="Southern CA Temperature", x="Year")+ geom_smooth(method="lm")
+```
+
+Part 2: E3SM Data
+
+Here is a brief demonstration of how to read in data from E3SM; once you do, you can use the exact same techniques as in Part 1 to create time series plots, maps, etc. Here I'm going to read in the two files into two different variables - you can also build a loop to do things if you like!
+
+```{r reade3sm}
+# path and filename for data
+ncpath <- "C:/Users/truel/Documents/Bren/ESM 237/HW2_sample/HW2_sample/"   # path (directory)
+dname <- "tas"  # this is the name of the variable you want to look at
+
+ncname1 <- "tas_Amon_E3SM-1-0_historical_r1i1p1f1_gr_185001-187412.nc"  # E3SM filename
+ncname2 <- "tas_Amon_E3SM-1-0_historical_r1i1p1f1_gr_187501-189912.nc"  # E3SM filename
+
+ncfname1 <- paste(ncpath, ncname1, sep="")
+ncfname2 <- paste(ncpath, ncname2, sep="")
+
+ncin_e3sm1 <- nc_open(ncfname1)
+ncin_e3sm2 <- nc_open(ncfname2)
+print(ncin_e3sm1)
+
+```
+
+Now once again, we read in the time coordinate information as we did for CESM. Since we happen to know that the second file begins immediately after the first one, we also know that we can concatenate the time information from the two files to get a time series of the full time period:
+
+```{r reade3smtime}
+time1 <- ncvar_get(ncin_e3sm1,"time")
+tunits1 <- ncatt_get(ncin_e3sm1,"time","units")
+time2 <- ncvar_get(ncin_e3sm2,"time")
+tunits2 <- ncatt_get(ncin_e3sm2,"time","units")
+
+time=c(time1,time2)
+
+print(tunits1)
+```
+
+Notice that the units of time are now different! E3SM uses a calendar which begins in 1850, rather than 1920. But we can still use the same method of splitting the units string, then giving it to 'chron' to make a time that works.
+
+```{r process_e3smtime}
+tustr <- strsplit(tunits1$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+rtime <- chron(time,origin=c(tmonth, tday, tyear))
+```
+
+You can use concatenation to stick the temperature data together as well: here I'm using the "abind" package to do this, where the "along" argument tells R which dimension to concatentate the arrays along. Whether or not you choose to do this is up to you - for some applications it will be more necessary than others. You can also regionally average the data from each file individually, then concatenate those average time series... there are lots of possibilities!
+
+```{r read_e3smtemp}
+tas1 <- ncvar_get(ncin_e3sm1, "tas")
+tas2 <- ncvar_get(ncin_e3sm2, "tas")
+
+tas=abind(tas1,tas2,along=1)
+```
+
+##################################
+```{r readcoords}
+lon1 <- ncvar_get(ncin_e3sm1,"lon")
+nlon <- dim(lon)
+lat1 <- ncvar_get(ncin_e3sm1,"lat")
+nlat <- dim(lat)
+lon
+
+head(lat)
+head(lon)
+
+```
+
+```{r getregion}
+lats=which(lat >= 32 & lat <= 35)
+lons=which(lon >= 241 & lon <= 243)
+
+tsavg <- apply(tas[lons,lats,],3,mean)
+
+clim <- data.frame(time=time, tsavg=tsavg)
+yrclim = clim %>% group_by(year(rtime)) %>% summarize(Tann=mean(tsavg))
+yrclim$dt = unique(year(rtime))
+
+ggplot(yrclim, aes(dt, Tann-273.15))+geom_point()+labs(y="Southern CA Temperature", x="Year")+ geom_smooth(method="lm")
+```
