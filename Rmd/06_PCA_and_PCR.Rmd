@@ -7,6 +7,7 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/home/clw/Documents/UCSB/Quarter7/PSTAT 262FE/Final Project/PSTAT_262FE_Final")
 ```
 
 ## Libraries
@@ -256,9 +257,10 @@ computational_time_density_plot =
     axis.title=element_text(size=14,face="bold"))
 
 ## Plot for report
-png(filename = "Images/PCA_Computational_Time.png", width = 960, height = 480)
+## Commented out for consistency
+#png(filename = "Images/PCA_Computational_Time.png", width = 960, height = 480)
 computational_time_density_plot
-dev.off()
+#dev.off()
 ```
 
 ## Confirm Methods produce same Principal Components

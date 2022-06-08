@@ -9,9 +9,13 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+# This is necessary given the nested directories.
+# Enter your working directory here
+knitr::opts_knit$set(root.dir = "/home/clw/Documents/UCSB/Quarter7/PSTAT 262FE/Final Project/PSTAT_262FE_Final")
 ```
 
-## Packages
+# Packages
 
 Install the following libraries to run this project. ncdf4 is only needed if the first code chunk is to be run.
 
@@ -46,7 +50,9 @@ library(car)
 library(knitr)
 ```
 
-## Load the Vulcan CO2 Data
+# Data Processing
+
+### Load the Vulcan CO2 Data
 
 The below code chunk processes the raw Vulcan CO2 data. The data sets are very large (80 files, approximately 30 GB in total size). If you'd like to rerun/change this portion of the code, you will have to download the data. See Raw/Vulcan_CO2/March2014/List_of_Files.txt for a list of the files.
 
@@ -148,7 +154,7 @@ remove(combined_df)
 ```
 
 
-## Load the EPA Ozone Data
+### Load the EPA Ozone Data
 
 Similar to the Vulcan data, the EPA Ozone data is large (but only about 2 GB). This chunk can be skipped. If you would like to run it, unzip the "Raw/EPA_Air_Data/hourly_44201_2014.zip" file.
 
@@ -216,10 +222,10 @@ ozone_monitor_plot = ggplot() +
 
 # Exclude Lancaster (9033) and Santa Clarita (6012)
 # Monitors from the Data Aggregation
-png(filename = "Images/ozone_monitor_plot.png", width = 480, height = 480)
+# uncomment code to output the map
+#png(filename = "Images/ozone_monitor_plot.png", width = 480, height = 480)
 ozone_monitor_plot
-dev.off()
-ozone_monitor_plot
+#dev.off()
 
 remove(ozone_la_california_lat_lons,lcc,meters,la_county_sf,ozone_monitor_plot)
 ```
@@ -245,7 +251,7 @@ save(ozone_la_california_collapsed,file = "Intermediate/Ozone_CA_LA.Rdata")
 remove(ozone_la_california,ozone_la_california_limited)
 ```
 
-## Merge Datasets
+### Merge Datasets
 
 The CO2 and Ozone data sets are merged (wide format) below.
 
@@ -262,7 +268,7 @@ remove(ozone_la_california_collapsed,CO2_Wide_V1)
 ```
 
 
-## Save Out Data
+### Save Out Data
 
 Save out the main dataframe for graphic, Ozone_CO2_Combined (and a long version for graphic). Additionally save out the model_data object for PCA, KPCA, and modeling.
 
@@ -309,11 +315,11 @@ model_data = Ozone_CO2_Combined %>%
 save(model_data,file = "Intermediate/model_data.Rdata")
 ```
 
-## Exploratory Data analysis
+# Exploratory Data analysis
 
 The below sections produce EDA plots for the report. Note that the code to save the image out is coded out in the below segments (i.e. the png() function and the dev.off() functions). Uncomment these lines of code to save the graphs to the Images folder.
 
-# Time Series plot of data
+### Time Series plot of data
 
 ```{r ts_plot}
 ## Plot Ozone Data for this Time Period
@@ -381,7 +387,7 @@ co2_scaled_plot
 remove(ozone_ts,co2_unscaled_plot,co2_scaled_plot)
 ```
 
-# ACFs and PACFs for Ozone
+### ACFs and PACFs for Ozone
 
 ```{r acf_pacf_ozone}
 ## Sample ACF
@@ -442,7 +448,7 @@ remove(ozone_acf_list,ozone_acf,conf.level,ciline,ACF_Ozone_Graph,
        ozone_pacf_list,ozone_pacf,PACF_Ozone_Graph)
 ```
 
-# ACFs and PACFs for Airport
+### ACFs and PACFs for Airport
 
 ```{r acf_pacf_airport}
 ## Sample ACF
@@ -503,7 +509,7 @@ remove(airport_acf_list,airport_acf,conf.level,ciline,ACF_Airport_Graph,airport_
 
 ```
 
-# ACFs and PACFs for Residential
+### ACFs and PACFs for Residential
 
 ```{r acf_pacf_residential}
 ## Sample ACF
@@ -563,7 +569,7 @@ plot_grid(ACF_Residential_Graph,PACF_Residential_Graph, labels = NULL, label_siz
 remove(residential_acf_list,residential_acf,conf.level,ciline,ACF_Residential_Graph,residential_pacf_list,residential_pacf,PACF_Residential_Graph)
 ```
 
-## CCF for Ozone vs Airport and Residential
+### CCF for Ozone vs Airport and Residential
 ```{r ccf}
 ## CCF Ozone Airport
 ozone_airport_ccf_list = ccf(Ozone_CO2_Combined$Sample.Measurement,Ozone_CO2_Combined$airport, plot = FALSE, lag.max = 48,
@@ -611,19 +617,20 @@ CCF_Ozone_Residential_Graph = ggplot(data = ozone_residential_ccf, mapping = aes
 
 
 ## Plots for Report
-png(filename = "Images/ccf_ozone_airport_residential.png", width = 960, height = 480)
+# Uncomment the code to output the plots
+#png(filename = "Images/ccf_ozone_airport_residential.png", width = 960, height = 480)
 plot_grid(CCF_Ozone_Airport_Graph,CCF_Ozone_Residential_Graph, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
-dev.off()
+#dev.off()
 
-remove(ozone_airport_ccf_list,ozone_airport_ccf,CCF_Ozone_Airport_Graph,ozone_residential_ccf_list,
+remove(ozone_airport_ccf_list,ozone_airport_ccf,CCF_Ozone_Airport_Graph,
        ozone_residential_ccf_list,ozone_residential_ccf,CCF_Ozone_Residential_Graph)
 ```
 
-## PCA
+# PCA Methods
 
 Analysis regardin PCA is performed in the following sections.
 
-# Prepare Data
+### Prepare Data
 
 The X matrix is the CO2 data for airport, commercial, electricity production, industrial, nonroad, onroad, and residential. Rail is excluded as it is invariate across the period. CMV and Cement where not reported for the sensors for the specified dates and geographic location.
 
@@ -639,11 +646,14 @@ X_hours = hour(Ozone_CO2_Combined$Date.Time)
 
 # Center and Scale Data
 X_scale_center = scale(X_Matrix,scale = TRUE, center = TRUE)
+
+# Clean Environment
+remove(CO2_Long_V1, Ozone_CO2_Combined_Long, Ozone_CO2_Combined_Long_Scaled)
 ```
 
 The following sections perform PCA via a number of methods, as discussed in the report. Each method is repeated 1000 times as each iteration can randomly fluctuate based on the machine running it (the metric is processing time on the machine).
 
-# PCA using Base R (Stats Package)
+### PCA using Base R (Stats Package)
 
 ```{r pca_prcomp}
 ## Use prcomp function To Get PC and Projection
@@ -668,7 +678,7 @@ prcomp_pc = prcomp_pca$x
 prcomp_proj = prcomp_pca$rotation
 ```
 
-# PCA Using Eigenvalue Decomposition
+### PCA Using Eigenvalue Decomposition
 
 ```{r pca_eigen}
 ## Use eigen Function in R to get PC and Projection
@@ -702,7 +712,7 @@ eigen_proj = eigen(C)$vectors
 eigen_C_values = eigen(C)$values
 ```
 
-# PCA Using Singular Value Decomp
+### PCA Using Singular Value Decomp
 
 ```{r pca_SVD}
 ## Use svd Function in R to get PC and Projection
@@ -731,7 +741,7 @@ svd_eigenvalues = svd_singular_values^2
 svd_proj = X_svd$v
 ```
 
-# PCA Using NIPALS Algorithm
+### PCA Using NIPALS Algorithm
 
 ```{r pca_nipals}
 # Set Seed for Reproducibility (to randomly set t)
@@ -807,7 +817,7 @@ for (j in 1:1000) {
 ```
 
 
-# PCA via Kernlab Package (Linear Kernel)
+### PCA via Kernlab Package (Linear Kernel)
 
 Note that the kernlab PCA, via vallidot kernel, was actually not found to be the same as the other methods. I am not sure why this is occuring: I don't believe any parameters (such as some scalar) are being provided.
 
@@ -836,9 +846,7 @@ kernlab_pc = pcv(kpca_kernlab_linear)
 kernlab_proj = rotated(kpca_kernlab_linear)
 ```
 
-
-# Plot Histograms of Processing time
-
+### Plot Histograms of Processing time
 
 ```{r pca_computational_time}
 # Create Dataframe for Plotting
@@ -864,8 +872,7 @@ computational_time_density_plot
 #dev.off()
 ```
 
-## Confirm Methods produce same Principal Components
-
+### Confirm Methods produce same Principal Components
 
 ```{r pc_confirmation}
 # Confirm Same Principal Components
@@ -874,9 +881,17 @@ sum(abs(prcomp_pc)-abs(svd_pc))
 sum(abs(prcomp_pc)-abs(nipals_pc))
 # Not the same, needs inspection
 sum(abs(prcomp_pc)-abs(xmatrix(kpca_kernlab_linear)))
+
+# Clean Environment
+remove(C, comp_df, computational_time_density_plot, eigen_pc,
+       eigen_proj, kernlab_pc, kernlab_proj, kpca_kernlab_linear,
+       nipals_pc, nipals_proj, prcomp_pc, prcomp_proj, 
+       time_eigen_pca, time_kernlab_pca, time_nipals_pca,
+       time_prcomp_pca, time_svd_pca, eigen_C_values, i, j,
+       svd_singular_values, X_svd)
 ```
 
-# Scree Plot
+### Scree Plot
 
 Below is the scree plot for this principal component analysis. The results are discussed in detail in the report
 ```{r pca_scree_plot}
@@ -907,8 +922,8 @@ pca_scree
 #dev.off()
 ```
 
+### Biplot of Principal Components
 
-# Biplot of Principal Components
 Similarly, interpretation and the results of the biplots are discussed in detail in the paper report.
 ```{r pca_biplot}
 ## Using ggbiplot package designed for PC object
@@ -948,10 +963,12 @@ biplot_1_2_groups_ellipses
 biplot_3_4_groups_ellipses
 #dev.off
 
+# Clean environment
+remove(biplot_1_2_groups, biplot_1_2_groups_ellipses, biplot_1_2_plain,
+       biplot_3_4_groups_ellipses)
 ```
 
-
-## Principal Component Regression
+### Principal Component Regression
 
 ```{r linear_model}
 # Illustrate why PCR is Useful Here
@@ -997,16 +1014,20 @@ pca_regression = pcr(pca_regression_model, data = as.data.frame(cbind(Y_Matrix,X
 # have been projected onto the subspace
 pcr_all_pc$coefficients %*% t(svd_proj)
 pca_regression$coefficients[,,7]
+
+# Clean Environment
+remove(pca_regression, pca_scree, pcr_4_pc, pcr_all_pc,
+       percent_variance_explained, prcomp_pca, svd_pc, 
+       svd_proj, pca_regression_model, svd_eigenvalues, 
+       model_pc_example, model_linear_1, df_example)
 ```
 
 
-## KPCA
+# Kernel Methods
 
-# Define Gram Matcies
+### Define Gram Matcies
 
-Note. There appear to be issues with this code. Specifically, at the moment the resulting matrix for the RBF case has negative eigenvalues. Given it is symmetric, this means it is not positive definite which suggests that something is wrong in this code chunk
-
-```{r distance_matrices}
+```{r gram_matrices}
 # Euclidean Distance Matrix Formula
 #RBF: Define Euclidean Distance Matrix 
 euclidean_distance_function = function(M) {
@@ -1032,33 +1053,118 @@ euclidean_distance_function = function(M) {
 
 
 #Radial Basis Function Kernel
-rbf_kernel = function(M, theta) {
+rbf_kernel = function(M, l) {
 
   # The euclidean distance matrix is squared
   # then multiplied by -sigma and exponentiated
-  gram = exp(-1*(euclidean_distance_function(M)^2)/theta)
+  gram = exp(-1*(euclidean_distance_function(M)^2)/l)
   return(gram)
 }
-
-# Below is what will be used in kPCA
-# q = rbf_kernel(X_scale_center,2)
 
 # Rational Quadratic Kernel
-rq_kernel = function(M,theta,alpha) {
-  gram = (1 + ((euclidean_distance_function(M)^2)/(theta*alpha)))^(-1*alpha)
+rq_kernel = function(M,l,alpha) {
+  gram = (1 + ((euclidean_distance_function(M)^2)/(l*alpha)))^(-1*alpha)
   return(gram)
 }
 
-# Below is what will be used in kPCA
-p = rq_kernel(X_scale_center,2,.5)
+# Periodic Kernel
+per_kernel = function(M,l,p) {
+  gram = exp((-1)*sin(abs(euclidean_distance_function(M))*(pi/p))/l)
+  return(gram)
+}
 
 ```
 
+### Calculate an Example value of the RBF Kernel 
 
-# KPCA RBF Kernel: Exploring how Changes in Sigma Effect Number of Principal Components
+Choose l = 2
 
-```{r KPCA_rbf}
-## RBF, Sigma = .01
+```{r gram_matrix_user}
+# With user defined RBF Kernel
+l = 2
+user_kernel_rbf_2 = rbf_kernel(X_scale_center,l)
+
+# Convert to data frame for plotting
+user_kernel_rbf_2_df = user_kernel_rbf_2 %>%
+  as.data.frame() %>%
+  dplyr::mutate(xi = row_number()) %>%
+  pivot_longer(starts_with("V"),names_to = "xj",values_to="Distance") %>%
+  as.data.frame() %>%
+  mutate(xj = as.numeric(str_remove(xj,"V")))
+
+# Plot
+user_kernel_rbf_2_plot = ggplot(data = user_kernel_rbf_2_df, aes(x=xi, y=xj, fill=Distance)) + 
+  geom_raster() + 
+  scale_fill_viridis_c() +
+  scale_x_continuous(n.breaks = 10) +
+  scale_y_continuous(n.breaks = 10) +
+  labs(title = "User Defined RBF, l = 2, Kernel (Gram Matrix)") +
+  theme_minimal()
+```
+
+### Calculate an Example value of the RBF Kernel Using Kernlab
+
+Choosing l = 2. Note that the Kerlab package refers to this parameter as the "inverse kernel width." Trial and error appears to indicate this value is 1/l, as the RBF kernel is defined in this project (i.e. the parameter called "sigma" in the Kernlab documentation is in the numerator, not the demoninator)
+
+```{r gram_matrix_kernlab}
+## initialize kernel function 
+l = 2
+rbf = rbfdot(sigma = 1/l)
+
+## calculate kernel matrix using Kernlab
+kernlab_kernel_rbf_2 = kernelMatrix(rbf, X_scale_center)
+# Convert to a data frame for plotting
+kernlab_kernel_rbf_2_df = kernlab_kernel_rbf_2 %>%
+  as.data.frame() %>%
+  dplyr::mutate(xi = row_number()) %>%
+  pivot_longer(starts_with("V"),names_to = "xj",values_to="Distance") %>%
+  as.data.frame() %>%
+  mutate(xj = as.numeric(str_remove(xj,"V")))
+
+# Plot
+kernlab_gram_rbf_2_plot = ggplot(data = kernlab_kernel_rbf_2_df, aes(x=xi, y=xj, fill=Distance)) + 
+  geom_raster() + 
+  scale_fill_viridis_c() +
+  scale_x_continuous(n.breaks = 10) +
+  scale_y_continuous(n.breaks = 10) +
+  labs(title = "Kernlab Defined RBF, sigma = .5, Kernel (Gram Matrix)") +
+  theme_minimal()
+
+```
+
+### Confirm the User defined kernel matches the kernlab version
+
+There are some rounding differences likely from computation, but the below confirms that the kernels from the kernlab package (rbf specification) and the user defined function are the same.
+
+```{r gram_matrix_check}
+# Check that the values are effectively 0
+max(kernlab_kernel_rbf_2 - user_kernel_rbf_2)
+min(kernlab_kernel_rbf_2 - user_kernel_rbf_2)
+
+# Plot both side by side
+# remove comments to export the visual
+#png(filename = "Images/check_gram_rbf_2.png", width = 1080, height = 480)
+plot_grid(user_kernel_rbf_2_plot,kernlab_gram_rbf_2_plot, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+#dev.off()
+
+remove(l, rbf, user_kernel_rbf_2_df, kernlab_kernel_rbf_2_df, user_kernel_rbf_2,
+       kernlab_kernel_rbf_2, user_kernel_rbf_2_plot,kernlab_gram_rbf_2_plot)
+```
+
+### KPCA RBF Kernel: Exploring how Changes in l Effect Number of Principal Components
+
+```{r kPCA_rbf}
+## RBF, l = .01
+
+## Note the kernlab package was used here. The "th" option  can be specificed in the kpca()
+## function to allow for more PC and eigenvalues to be calculated. However, this section
+## was sufficient in its currect form for the report and was left as is (e.g. th = 10^(-20))
+
+# Note this section uses "sigma" and "l" interchangeably. The report sticks to "l"
+# But some of the code was wirtten with "sigma" based on the definition in the 
+# kernlab package
+
+
 # sigma is defined as the "inverse kernel width on Kernlab", i.e. is in the denominator
 kpca_kernlab_rbf_01 = kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
             kpar=list(sigma=.01))
@@ -1083,11 +1189,6 @@ kpca_rbf_scree_01 = ggplot(data = percent_variance_explained_rbf_01, aes(x = PC,
     axis.text.y = element_text(angle=90, hjust=1, size = 10),
     axis.text.x = element_text(size = 14),
     axis.title=element_text(size=14,face="bold"))
-
-# plot the output
-#png(filename = "Images/rbf_sigma_01.png", width = 480, height = 480)
-kpca_rbf_scree_01
-#dev.off()
 
 
 ## RBF, Sigma = 1
@@ -1116,12 +1217,6 @@ kpca_rbf_scree_1 = ggplot(data = percent_variance_explained_rbf_1, aes(x = PC, y
     axis.text.x = element_text(size = 14),
     axis.title=element_text(size=14,face="bold"))
 
-# Plot the output
-#png(filename = "Images/rbf_sigma_1.png", width = 480, height = 480)
-kpca_rbf_scree_1
-#dev.off()
-
-
 ## RBF, Sigma = 2
 # sigma is defined as the "inverse kernel width on Kernlab", i.e. is in the denominator
 kpca_kernlab_rbf_2 = kpca(~.,as.data.frame(X_scale_center),kernel="rbfdot",
@@ -1148,13 +1243,8 @@ kpca_rbf_scree_2 = ggplot(data = percent_variance_explained_rbf_2, aes(x = PC, y
     axis.text.x = element_text(size = 14),
     axis.title=element_text(size=14,face="bold"))
 
-# save the output
-#png(filename = "Images/rbf_sigma_2.png", width = 480, height = 480)
-kpca_rbf_scree_2
-#dev.off()
 
-
-## Measure relationship between sigma and number of PCs
+## Measure relationship between l and number of PCs
 # required to get to 75% of variance explained
 
 # Define a list of sigmas to explore (l in project formula)
@@ -1204,141 +1294,261 @@ pca_count_plot_rbf = ggplot(data = rbf_df, aes(x = sigma, y = pc_count)) +
   
 
 # Save the output
+# Remove comments to export the visual
 #png(filename = "Images/rbf_varying_sigma.png", width = 960, height = 480)
 pca_count_plot_rbf
 #dev.off
 
+
+# Plot scree plots side by side
+# Remove comments to export the visual
+#png(filename = "Images/rbf_sigma_01_and_2.png", width = 960, height = 480)
+plot_grid(kpca_rbf_scree_01,kpca_rbf_scree_2, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+#dev.off()
+
+# Clean environment
+remove(counter, i, kpcs_rbf_eig_01,kpcs_rbf_eig_1, kpcs_rbf_eig_2,
+       sigma_list, kpca_kernlab_rbf_01, kpca_kernlab_rbf_1, 
+       kpca_kernlab_rbf_2, kpca_rbf_scree_01, kpca_rbf_scree_1,
+       kpca_rbf_scree_2,
+       pca_count_plot_rbf, percent_variance_explained_rbf_01, 
+       percent_variance_explained_rbf_1, percent_variance_explained_rbf_2, 
+       rbf_df, kpcs_rbf_pc_01, kpcs_rbf_pc_1, kpcs_rbf_pc_2)
 ```
 
+### KPCA RQ Kernel: Exploring Changes in l and alpha
 
-# KPCA Polydot Kernel: Exploring how Changes in Degree Effect Number of Principal Components
+```{r rq_kernel}
+## Generate RBF Kernel and Plot
+# RQ, l = .1, alpha = .01
+rq_gram_1_01 = rq_kernel(X_scale_center,.1,.01)
 
-```{r kPCA_poly}
-## Poly, Degree = 1
-kpca_kernlab_poly_1 = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
-            kpar=list(degree = 1))
+# Convert to data frame for plotting
+user_kernel_rq_1_01_df = rq_gram_1_01 %>%
+  as.data.frame() %>%
+  dplyr::mutate(xi = row_number()) %>%
+  pivot_longer(starts_with("V"),names_to = "xj",values_to="Distance") %>%
+  as.data.frame() %>%
+  mutate(xj = as.numeric(str_remove(xj,"V")))
 
-kpcs_poly_1 = pcv(kpca_kernlab_poly_1)
-kpcs_poly_eig_1 = eig(kpca_kernlab_poly_1)
+# Plot
+user_kernel_rq_1_01_plot = ggplot(data = user_kernel_rq_1_01_df, aes(x=xi, y=xj, fill=Distance)) + 
+  geom_raster() + 
+  scale_fill_viridis_c() +
+  scale_x_continuous(n.breaks = 10) +
+  scale_y_continuous(n.breaks = 10) +
+  labs(title = "User Defined RQ, l = .1, alpha = .01 Kernel (Gram Matrix)") +
+  theme_minimal()
 
-# Percent of Variance Explained
-percent_variance_explained_poly_1 = 
-  data.frame(PC = seq(1,length(kpcs_poly_eig_1),by=1), 
-             Percent_Variance = (kpcs_poly_eig_1 / sum(kpcs_poly_eig_1)))
-
-# Create Scree Plot
-kpca_poly_scree_1 = ggplot(data = percent_variance_explained_poly_1, aes(x = PC, y = Percent_Variance)) +
-  geom_point() +
-  geom_line() +
-  labs(x = "Principal Component", y = "Percent of Variance Explained") +
-  theme(text = element_text(size = 20),
-    legend.title = element_text(size = 14),
-    legend.text = element_text(size = 14),
-    legend.key.width=unit(1,"cm"),
-    axis.text.y = element_text(angle=90, hjust=1, size = 10),
-    axis.text.x = element_text(size = 14),
-    axis.title=element_text(size=14,face="bold"))
-
-#png(filename = "Images/poly_degree_1.png", width = 480, height = 480)
-kpca_poly_scree_1
+# Export image for the report
+# uncomment code to export the image
+#png(filename = "Images/user_gram_rq_1_01.png", width = 480, height = 480)
+user_kernel_rq_1_01_plot
 #dev.off()
 
 
-## Poly, Degree = 2
-kpca_kernlab_poly_2 = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
-            kpar=list(degree = 2))
 
-kpcs_poly_2 = pcv(kpca_kernlab_poly_2)
-kpcs_poly_eig_2 = eig(kpca_kernlab_poly_2)
+## Measure relationship between l and alpha and the number of PCs
+# required to get to 75% of variance explained
 
-# Percent of Variance Explained
-percent_variance_explained_poly_2 = 
-  data.frame(PC = seq(1,length(kpcs_poly_eig_2),by=1), 
-             Percent_Variance = (kpcs_poly_eig_2 / sum(kpcs_poly_eig_2)))
+# Define a list of l to explore
+l_list = seq(.01,2.1,by = .1)
+alpha_list = seq(.01,2.1,by = .1)
 
-# Create Scree Plot
-kpca_poly_scree_2 = ggplot(data = percent_variance_explained_poly_2, aes(x = PC, y = Percent_Variance)) +
-  geom_point() +
-  geom_line() +
-  labs(x = "Principal Component", y = "Percent of Variance Explained") +
-  theme(text = element_text(size = 20),
-    legend.title = element_text(size = 14),
-    legend.text = element_text(size = 14),
-    legend.key.width=unit(1,"cm"),
-    axis.text.y = element_text(angle=90, hjust=1, size = 10),
-    axis.text.x = element_text(size = 14),
-    axis.title=element_text(size=14,face="bold"))
-
-#png(filename = "Images/poly_degree_2.png", width = 480, height = 480)
-kpca_poly_scree_2
-#dev.off()
-
-
-## Poly, Degree = 10
-kpca_kernlab_poly_10 = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
-            kpar=list(degree = 10))
-
-kpcs_poly_10 = pcv(kpca_kernlab_poly_10)
-kpcs_poly_eig_10 = eig(kpca_kernlab_poly_10)
-
-# Percent of Variance Explained
-percent_variance_explained_poly_10 = 
-  data.frame(PC = seq(1,length(kpcs_poly_eig_10),by=1), 
-             Percent_Variance = (kpcs_poly_eig_10 / sum(kpcs_poly_eig_10)))
-
-# Create Scree Plot
-kpca_poly_scree_10 = ggplot(data = percent_variance_explained_poly_10, aes(x = PC, y = Percent_Variance)) +
-  geom_point() +
-  geom_line() +
-  labs(x = "Principal Component", y = "Percent of Variance Explained") +
-  theme(text = element_text(size = 20),
-    legend.title = element_text(size = 14),
-    legend.text = element_text(size = 14),
-    legend.key.width=unit(1,"cm"),
-    axis.text.y = element_text(angle=90, hjust=1, size = 10),
-    axis.text.x = element_text(size = 14),
-    axis.title=element_text(size=14,face="bold"))
-
-#png(filename = "Images/poly_degree_10.png", width = 480, height = 480)
-kpca_poly_scree_10
-#dev.off()
-
-
-## Measure relationship between sigma and number of PCs
-# required to get to 50% of variance explained
-
-# Define a list of degrees
-degree_list = seq(1,15,by = 1)
-
-# create dataframe to capture the results
-poly_df = data.frame(poly = degree_list, pc_count = rep(NA,length(degree_list)))
+# Specify dataframe to add the number of PCs
+# necessary
+rq_df = data.frame(l = l_list, alpha = alpha_list)
+rq_df = as.data.frame(expand(rq_df,l,alpha))
+rq_df$pc_count = rep(NA,length(rq_df$l))
 
 # Counter for loop
 counter = 0
 
-for (i in degree_list) {
+# Loop over each value
+# Order matters here: depends on
+# how df is constructed
+for (l in l_list) {
+  for (a in alpha_list) {
   counter = counter + 1
   
-  # Perform kpca with the polynomial kernel
-  kpca_kernlab_poly = kpca(~.,as.data.frame(X_scale_center),kernel="polydot",
-            kpar=list(degree = i))
+    # Calculate the Gram Matrix
+    rq_gram = rq_kernel(X_scale_center,l,a)
+    
+    # Calculate the cumulative variance, as provided
+    # by the normalized eigenvalues
+    cumeig = cumsum(eigen(rq_gram)$values/sum(eigen(rq_gram)$values))
+    
+    # Get the number of eigenvalues (i.e. PCs) necessary
+    # to get to 75%
+    number = length(cumeig[which(cumeig < .75)]) + 1
   
-  # Calculate the cumulative sum of the normalized eigenvalues
-  cumeig = cumsum(eig(kpca_kernlab_poly)/sum(eig(kpca_kernlab_poly)))
-  
-  #measure how many PCs are necessary to get to over 75% of variance explained
-  number = length(cumeig[which(cumeig < .75)]) + 1
-
-  poly_df[counter,2] = as.numeric(number)
-  
-  remove(kpca_kernlab_poly,cumeig,number)
+    #store the variable
+    rq_df[counter,3] = as.numeric(number)
+    
+    remove(rq_gram,cumeig,number)
+  }
 }
 
-# Plot the output
-pca_count_plot_poly = ggplot(data = poly_df, aes(x = poly, y = pc_count)) + 
+# Plot heatmap of l and alpha, with fill value being 
+pca_count_plot_rq_log = ggplot(data = rq_df, aes(x=l, y=alpha, fill=log(pc_count))) + 
+  geom_raster() + 
+  scale_fill_viridis_c() +
+  scale_x_continuous(n.breaks = 10) +
+  scale_y_continuous(n.breaks = 10) +
+  labs(title = "# of Principal Components \n needed to explain 75% variation") +
+  theme_minimal()
+
+# Plot heatmap of l and alpha, with fill value being 
+pca_count_plot_rq = ggplot(data = rq_df, aes(x=l, y=alpha, fill=pc_count)) + 
+  geom_raster() + 
+  scale_fill_viridis_c() +
+  scale_x_continuous(n.breaks = 10) +
+  scale_y_continuous(n.breaks = 10) +
+  labs(title = "# of Principal Components \n needed to explain 75% variation") +
+  theme_minimal()
+  
+
+# Save the output
+#png(filename = "Images/rq_varying_parameters.png", width = 1200, height = 480)
+plot_grid(pca_count_plot_rq_log,pca_count_plot_rq, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+#dev.off
+
+# Clean environment
+remove(pca_count_plot_rq, pca_count_plot_rq_log, rq_df, rq_gram_1_01, user_kernel_rq_1_01_df, 
+       user_kernel_rq_1_01_plot,a, alpha_list, counter, l, l_list)
+```
+
+
+### KPCA PER Kernel: Exploring Changes in l and p
+
+```{r per_kernel}
+## Generate RBF Kernel and Plot
+# PER, l = .1, p = 24
+per_gram_1_24 = per_kernel(X_scale_center,.1,24)
+
+# Convert to data frame for plotting
+user_kernel_per_1_24_df = per_gram_1_24 %>%
+  as.data.frame() %>%
+  dplyr::mutate(xi = row_number()) %>%
+  pivot_longer(starts_with("V"),names_to = "xj",values_to="Distance") %>%
+  as.data.frame() %>%
+  mutate(xj = as.numeric(str_remove(xj,"V")))
+
+# Plot
+user_kernel_per_1_24_plot = ggplot(data = user_kernel_per_1_24_df, aes(x=xi, y=xj, fill=Distance)) + 
+  geom_raster() + 
+  scale_fill_viridis_c() +
+  scale_x_continuous(n.breaks = 10) +
+  scale_y_continuous(n.breaks = 10) +
+  labs(title = "User Defined PER, l = .1, p = 24 Kernel (Gram Matrix)") +
+  theme_minimal()
+
+
+# PER, l = .1, p = 7
+per_gram_1_7 = per_kernel(X_scale_center,.1,7)
+
+# Convert to data frame for plotting
+user_kernel_per_1_7_df = per_gram_1_7 %>%
+  as.data.frame() %>%
+  dplyr::mutate(xi = row_number()) %>%
+  pivot_longer(starts_with("V"),names_to = "xj",values_to="Distance") %>%
+  as.data.frame() %>%
+  mutate(xj = as.numeric(str_remove(xj,"V")))
+
+# Plot
+user_kernel_per_1_7_plot = ggplot(data = user_kernel_per_1_7_df, aes(x=xi, y=xj, fill=Distance)) + 
+  geom_raster() + 
+  scale_fill_viridis_c() +
+  scale_x_continuous(n.breaks = 10) +
+  scale_y_continuous(n.breaks = 10) +
+  labs(title = "User Defined PER, l = .1, p = 7 Kernel (Gram Matrix)") +
+  theme_minimal()
+
+# Export image for the report
+# uncomment code to export the image
+#png(filename = "Images/user_gram_per_01_7vs24.png", width = 1200, height = 480)
+plot_grid(user_kernel_per_1_7_plot,user_kernel_per_1_24_plot, labels = NULL, label_size = 12, ncol = 2, nrow = 1)
+#dev.off()
+
+
+
+
+## Measure relationship between l and number of PCs
+# required to get to 75% of variance explained
+# fix p = 24
+
+# Define a list of sigmas to explore (l in project formula)
+l_list = seq(.01,2.1,by = .1)
+p = 24
+
+# Specify dataframe to add the number of PCs (technically loading vectors)
+# necessary
+per_df = data.frame(l = l_list, pc_count = rep(NA,length(l_list)))
+
+# Counter for loop
+counter = 0
+
+# Loop over each value
+for (i in l_list) {
+  counter = counter + 1
+  
+    # Calculate the Gram Matrix
+    per_gram = per_kernel(X_scale_center,i,p)
+    
+    # Calculate the cumulative variance, as provided
+    # by the normalized eigenvalues
+    cumeig = cumsum(eigen(per_gram)$values/sum(eigen(per_gram)$values))
+    
+    # Get the number of eigenvalues (i.e. PCs) necessary
+    # to get to 75%
+    number = length(cumeig[which(cumeig < .75)]) + 1
+  
+    #store the variable
+    per_df[counter,2] = as.numeric(number)
+    
+    remove(per_gram,cumeig,number)
+}
+
+# Plot the Value of sigma by the variable
+pca_count_plot_per = ggplot(data = per_df, aes(x = l, y = pc_count)) + 
   geom_point() +
   geom_line() +
-  labs(x = "Degree", y = "# of Principal Components \n needed to explain 75% variation") +
+  labs(x = "l", y = "# of Principal Components \n needed to explain 75% variation\np=24") +
+  theme(text = element_text(size = 20),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.key.width=unit(1,"cm"),
+    axis.text.y = element_text(angle=90, hjust=1, size = 10),
+    axis.text.x = element_text(size = 14),
+    axis.title=element_text(size=14,face="bold"))
+  
+
+# Save the output
+# Unccoment to output plots
+#png(filename = "Images/per_varying_l_p_24.png", width = 960, height = 480)
+pca_count_plot_per
+#dev.off
+
+
+
+
+## Scree Plot for l = .4, p = 24
+# sigma is defined as the "inverse kernel width on Kernlab", i.e. is in the denominator
+kpca_per_4_24 = per_kernel(X_scale_center,.4,24)
+
+per_4_24_eigenvalues = eigen(kpca_per_4_24)$values
+
+# Percent of Variance Explained
+percent_variance_explained_per_4_24 = 
+  data.frame(PC = seq(1,length(per_4_24_eigenvalues),by=1), 
+             Percent_Variance = (per_4_24_eigenvalues / sum(per_4_24_eigenvalues)))
+
+# Create Scree Plot
+# Only show the first 30
+kpca_per_scree_4_24 = ggplot(data = percent_variance_explained_per_4_24[1:30,], aes(x = PC, y = Percent_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Principal Component", y = "Percent of Variance Explained") +
   theme(text = element_text(size = 20),
     legend.title = element_text(size = 14),
     legend.text = element_text(size = 14),
@@ -1347,9 +1557,34 @@ pca_count_plot_poly = ggplot(data = poly_df, aes(x = poly, y = pc_count)) +
     axis.text.x = element_text(size = 14),
     axis.title=element_text(size=14,face="bold"))
 
-# Save the output
-#png(filename = "Images/poly_varying_degree.png", width = 960, height = 480)
-pca_count_plot_poly
-#dev.off
+# plot the output
+# uncomment to output plots
+#png(filename = "Images/per_4_24.png", width = 480, height = 480)
+kpca_per_scree_4_24
+#dev.off()
 
+# clean environment
+remove(kpca_per_4_24,kpca_per_scree_4_24, pca_count_plot_per, per_df, 
+       per_gram_1_24, per_gram_1_7, percent_variance_explained_per_4_24, 
+       user_kernel_per_1_24_df, user_kernel_per_1_24_plot, user_kernel_per_1_7_df,
+       user_kernel_per_1_7_plot, counter, i, l_list, p, per_4_24_eigenvalues)
+```
+
+### Kernel Principal Component Regression
+
+```{r kpcr}
+# Perform SVD Using R Function
+# To get the Principal components
+kpca_per_4_24 = per_kernel(X_scale_center,.4,24)
+K_per_svd = svd(kpca_per_4_24)
+
+# Get Principal Compents by m
+k_per_pca = K_per_svd$u%*%diag(K_per_svd$d)
+  
+# Fit model
+kpcr_per = lm(Y_Matrix ~ k_per_pca[,c(1:6)] - 1)
+summary(kpcr_per)
+
+# Clean environment
+remove(k_per_pca, K_per_svd, kpca_per_4_24)
 ```
